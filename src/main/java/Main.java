@@ -32,11 +32,13 @@ public class Main {
             int redirIndex = -1;
             String outputFile = null;
             boolean redirectStderr = false;
+            boolean redirectStdout = false;
             
             for (int i = 0; i < tokens.size(); i++) {
                 String token = tokens.get(i);
                 if (token.equals(">") || token.equals("1>")) {
                     redirIndex = i;
+                    redirectStdout = true;
                     redirectStderr = false;
                     if (i + 1 < tokens.size()) {
                         outputFile = tokens.get(i + 1);
@@ -44,6 +46,7 @@ public class Main {
                     break;
                 } else if (token.equals("2>")) {
                     redirIndex = i;
+                    redirectStdout = false;
                     redirectStderr = true;
                     if (i + 1 < tokens.size()) {
                         outputFile = tokens.get(i + 1);
@@ -74,8 +77,13 @@ public class Main {
             // echo builtin
             if (command.equals("echo")) {
                 String output = String.join(" ", argsArr);
-                if (redirectOutput) {
+                if (redirectOutput && redirectStdout) {
                     writeToFile(outputFile, output);
+                } else if (redirectOutput && redirectStderr) {
+                    // echo doesn't produce stderr, but we should create an empty file
+                    createEmptyFile(outputFile);
+                    // Still print the output to stdout
+                    System.out.println(output);
                 } else {
                     System.out.println(output);
                 }
@@ -85,8 +93,13 @@ public class Main {
             // pwd builtin
             if (command.equals("pwd")) {
                 String cwd = System.getProperty("user.dir");
-                if (redirectOutput) {
+                if (redirectOutput && redirectStdout) {
                     writeToFile(outputFile, cwd);
+                } else if (redirectOutput && redirectStderr) {
+                    // pwd doesn't produce stderr, create empty file
+                    createEmptyFile(outputFile);
+                    // Still print the output to stdout
+                    System.out.println(cwd);
                 } else {
                     System.out.println(cwd);
                 }
@@ -101,6 +114,10 @@ public class Main {
                         home = System.getProperty("user.home");
                     }
                     System.setProperty("user.dir", home);
+                    if (redirectOutput && redirectStderr) {
+                        // cd with no args doesn't produce stderr, create empty file
+                        createEmptyFile(outputFile);
+                    }
                 } else {
                     String newPath = argsArr[0];
                     
@@ -132,10 +149,17 @@ public class Main {
                         
                         if (canonicalFile.exists() && canonicalFile.isDirectory()) {
                             System.setProperty("user.dir", canonicalPath);
+                            if (redirectOutput && redirectStderr) {
+                                // cd succeeded, doesn't produce stderr, create empty file
+                                createEmptyFile(outputFile);
+                            }
                         } else {
                             String errorMsg = "cd: " + newPath + ": No such file or directory";
-                            if (redirectOutput) {
+                            if (redirectOutput && redirectStderr) {
                                 writeToFile(outputFile, errorMsg);
+                            } else if (redirectOutput && redirectStdout) {
+                                // cd error goes to stderr, not stdout
+                                System.err.println(errorMsg);
                             } else {
                                 System.out.println(errorMsg);
                             }
@@ -143,8 +167,10 @@ public class Main {
                         
                     } catch (IOException e) {
                         String errorMsg = "cd: " + newPath + ": Error changing directory";
-                        if (redirectOutput) {
+                        if (redirectOutput && redirectStderr) {
                             writeToFile(outputFile, errorMsg);
+                        } else if (redirectOutput && redirectStdout) {
+                            System.err.println(errorMsg);
                         } else {
                             System.out.println(errorMsg);
                         }
@@ -170,8 +196,13 @@ public class Main {
                     }
                 }
                 
-                if (redirectOutput) {
+                if (redirectOutput && redirectStdout) {
                     writeToFile(outputFile, output);
+                } else if (redirectOutput && redirectStderr) {
+                    // type doesn't produce stderr, create empty file
+                    createEmptyFile(outputFile);
+                    // Still print the output to stdout
+                    System.out.println(output);
                 } else {
                     System.out.println(output);
                 }
@@ -182,15 +213,36 @@ public class Main {
             String path = findExecutable(command);
 
             if (path != null) {
-                executeExternal(command, path, argsArr, redirectOutput, outputFile, redirectStderr);
+                executeExternal(command, path, argsArr, redirectStdout, redirectStderr, outputFile);
             } else {
                 String errorMsg = command + ": command not found";
-                if (redirectOutput) {
+                if (redirectOutput && redirectStderr) {
                     writeToFile(outputFile, errorMsg);
+                } else if (redirectOutput && redirectStdout) {
+                    // Command not found error goes to stderr, not stdout
+                    System.err.println(errorMsg);
                 } else {
                     System.out.println(errorMsg);
                 }
             }
+        }
+    }
+
+    static void createEmptyFile(String filename) {
+        try {
+            File file = new File(filename);
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            
+            // Create empty file
+            if (!file.exists()) {
+                file.createNewFile();
+            }
+            // If file exists, we don't need to do anything (it's already empty)
+        } catch (IOException e) {
+            System.err.println("Error creating file: " + e.getMessage());
         }
     }
 
@@ -209,7 +261,7 @@ public class Main {
                 }
             }
         } catch (IOException e) {
-            System.out.println("Error writing to file: " + e.getMessage());
+            System.err.println("Error writing to file: " + e.getMessage());
         }
     }
 
@@ -322,8 +374,8 @@ public class Main {
     }
 
     static void executeExternal(String command, String path, String[] args, 
-                                boolean redirectOutput, String outputFile, 
-                                boolean redirectStderr) {
+                                boolean redirectStdout, boolean redirectStderr, 
+                                String outputFile) {
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add(command);
@@ -331,21 +383,25 @@ public class Main {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             
-            if (redirectOutput && outputFile != null) {
+            if (outputFile != null && (redirectStdout || redirectStderr)) {
                 File file = new File(outputFile);
                 File parent = file.getParentFile();
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
                 
-                if (redirectStderr) {
-                    // Redirect stderr to file, stdout to terminal
-                    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                if (redirectStdout && redirectStderr) {
+                    // Redirect both stdout and stderr to the same file
+                    pb.redirectOutput(file);
                     pb.redirectError(file);
-                } else {
+                } else if (redirectStdout) {
                     // Redirect stdout to file, stderr to terminal
                     pb.redirectOutput(file);
                     pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                } else if (redirectStderr) {
+                    // Redirect stderr to file, stdout to terminal
+                    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                    pb.redirectError(file);
                 }
             } else {
                 // Inherit both stdout and stderr
@@ -356,7 +412,7 @@ public class Main {
             int exitCode = process.waitFor();
 
         } catch (Exception e) {
-            System.out.println("Error executing command: " + e.getMessage());
+            System.err.println("Error executing command: " + e.getMessage());
         }
     }
 }
