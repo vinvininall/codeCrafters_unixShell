@@ -27,22 +27,69 @@ public class Main {
             
             if (tokens.isEmpty())
                 continue;
+            
+            // Check for output redirection (> or 1> or 2>)
+            int redirIndex = -1;
+            String outputFile = null;
+            boolean redirectStderr = false;
+            
+            for (int i = 0; i < tokens.size(); i++) {
+                String token = tokens.get(i);
+                if (token.equals(">") || token.equals("1>")) {
+                    redirIndex = i;
+                    redirectStderr = false;
+                    if (i + 1 < tokens.size()) {
+                        outputFile = tokens.get(i + 1);
+                    }
+                    break;
+                } else if (token.equals("2>")) {
+                    redirIndex = i;
+                    redirectStderr = true;
+                    if (i + 1 < tokens.size()) {
+                        outputFile = tokens.get(i + 1);
+                    }
+                    break;
+                }
+            }
+            
+            // Extract command and arguments (excluding redirection tokens)
+            List<String> cmdTokens;
+            if (redirIndex != -1) {
+                cmdTokens = tokens.subList(0, redirIndex);
+            } else {
+                cmdTokens = tokens;
+            }
+            
+            if (cmdTokens.isEmpty())
+                continue;
                 
-            String command = tokens.get(0);
-            String[] argsArr = tokens.size() > 1 ? 
-                tokens.subList(1, tokens.size()).toArray(new String[0]) : 
+            String command = cmdTokens.get(0);
+            String[] argsArr = cmdTokens.size() > 1 ? 
+                cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
                 new String[0];
+
+            // Check if we need to redirect output
+            boolean redirectOutput = (redirIndex != -1 && outputFile != null);
 
             // echo builtin
             if (command.equals("echo")) {
-                System.out.println(String.join(" ", argsArr));
+                String output = String.join(" ", argsArr);
+                if (redirectOutput) {
+                    writeToFile(outputFile, output);
+                } else {
+                    System.out.println(output);
+                }
                 continue;
             }
 
             // pwd builtin
             if (command.equals("pwd")) {
                 String cwd = System.getProperty("user.dir");
-                System.out.println(cwd);
+                if (redirectOutput) {
+                    writeToFile(outputFile, cwd);
+                } else {
+                    System.out.println(cwd);
+                }
                 continue;
             }
 
@@ -86,11 +133,21 @@ public class Main {
                         if (canonicalFile.exists() && canonicalFile.isDirectory()) {
                             System.setProperty("user.dir", canonicalPath);
                         } else {
-                            System.out.println("cd: " + newPath + ": No such file or directory");
+                            String errorMsg = "cd: " + newPath + ": No such file or directory";
+                            if (redirectOutput) {
+                                writeToFile(outputFile, errorMsg);
+                            } else {
+                                System.out.println(errorMsg);
+                            }
                         }
                         
                     } catch (IOException e) {
-                        System.out.println("cd: " + newPath + ": Error changing directory");
+                        String errorMsg = "cd: " + newPath + ": Error changing directory";
+                        if (redirectOutput) {
+                            writeToFile(outputFile, errorMsg);
+                        } else {
+                            System.out.println(errorMsg);
+                        }
                     }
                 }
                 continue;
@@ -99,17 +156,24 @@ public class Main {
             // type builtin
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
+                String output = "";
 
                 if (builtins.contains(cmd)) {
-                    System.out.println(cmd + " is a shell builtin");
+                    output = cmd + " is a shell builtin";
                 } else {
                     String path = findExecutable(cmd);
 
                     if (path != null) {
-                        System.out.println(cmd + " is " + path);
+                        output = cmd + " is " + path;
                     } else {
-                        System.out.println(cmd + ": not found");
+                        output = cmd + ": not found";
                     }
+                }
+                
+                if (redirectOutput) {
+                    writeToFile(outputFile, output);
+                } else {
+                    System.out.println(output);
                 }
                 continue;
             }
@@ -118,10 +182,34 @@ public class Main {
             String path = findExecutable(command);
 
             if (path != null) {
-                executeExternal(command, path, argsArr);
+                executeExternal(command, path, argsArr, redirectOutput, outputFile, redirectStderr);
             } else {
-                System.out.println(command + ": command not found");
+                String errorMsg = command + ": command not found";
+                if (redirectOutput) {
+                    writeToFile(outputFile, errorMsg);
+                } else {
+                    System.out.println(errorMsg);
+                }
             }
+        }
+    }
+
+    static void writeToFile(String filename, String content) {
+        try {
+            File file = new File(filename);
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            
+            try (FileWriter writer = new FileWriter(file)) {
+                writer.write(content);
+                if (!content.endsWith("\n")) {
+                    writer.write("\n");
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Error writing to file: " + e.getMessage());
         }
     }
 
@@ -149,7 +237,7 @@ public class Main {
                 continue;
             }
             
-            // Inside single quotes - everything is literal (including backslashes)
+            // Inside single quotes - everything is literal
             if (inSingleQuotes) {
                 currentToken.append(c);
                 i++;
@@ -159,27 +247,20 @@ public class Main {
             // Inside double quotes - handle backslash escaping
             if (inDoubleQuotes) {
                 if (c == '\\') {
-                    // Check if there's a next character
                     if (i + 1 < input.length()) {
                         char nextChar = input.charAt(i + 1);
-                        // In double quotes, backslash escapes: ", \, $, `, and newline
-                        // For this stage, we handle " and \
                         if (nextChar == '"' || nextChar == '\\') {
-                            // Escape the character - add it literally and skip both
                             currentToken.append(nextChar);
                             i += 2;
                         } else {
-                            // For other characters, backslash is literal
                             currentToken.append(c);
                             i++;
                         }
                     } else {
-                        // Backslash at end of input - treat as literal
                         currentToken.append(c);
                         i++;
                     }
                 } else {
-                    // Regular character inside double quotes
                     currentToken.append(c);
                     i++;
                 }
@@ -188,14 +269,11 @@ public class Main {
             
             // Outside quotes - handle backslash escaping
             if (c == '\\') {
-                // Check if there's a next character to escape
                 if (i + 1 < input.length()) {
                     char nextChar = input.charAt(i + 1);
-                    // Escape the next character (remove special meaning)
                     currentToken.append(nextChar);
-                    i += 2; // Skip both backslash and the escaped character
+                    i += 2;
                 } else {
-                    // Backslash at end of input - treat as literal
                     currentToken.append(c);
                     i++;
                 }
@@ -204,7 +282,6 @@ public class Main {
             
             // Outside quotes
             if (c == ' ' || c == '\t') {
-                // Whitespace - end current token if not empty
                 if (currentToken.length() > 0) {
                     tokens.add(currentToken.toString());
                     currentToken = new StringBuilder();
@@ -218,7 +295,6 @@ public class Main {
             i++;
         }
         
-        // Add the last token if not empty
         if (currentToken.length() > 0) {
             tokens.add(currentToken.toString());
         }
@@ -245,18 +321,39 @@ public class Main {
         return null;
     }
 
-    static void executeExternal(String command, String path, String[] args) {
+    static void executeExternal(String command, String path, String[] args, 
+                                boolean redirectOutput, String outputFile, 
+                                boolean redirectStderr) {
         try {
             List<String> cmd = new ArrayList<>();
-
             cmd.add(command);
             cmd.addAll(Arrays.asList(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.inheritIO();
+            
+            if (redirectOutput && outputFile != null) {
+                File file = new File(outputFile);
+                File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs();
+                }
+                
+                if (redirectStderr) {
+                    // Redirect stderr to file, stdout to terminal
+                    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                    pb.redirectError(file);
+                } else {
+                    // Redirect stdout to file, stderr to terminal
+                    pb.redirectOutput(file);
+                    pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                }
+            } else {
+                // Inherit both stdout and stderr
+                pb.inheritIO();
+            }
 
             Process process = pb.start();
-            process.waitFor();
+            int exitCode = process.waitFor();
 
         } catch (Exception e) {
             System.out.println("Error executing command: " + e.getMessage());
