@@ -4,7 +4,7 @@ import java.io.*;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type", "pwd", "cd"));  // Add "cd" here
+            Arrays.asList("echo", "exit", "type", "pwd", "cd")); // Add "cd" here
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -40,6 +40,7 @@ public class Main {
             }
 
             // cd builtin
+            // cd builtin
             if (command.equals("cd")) {
                 if (argsArr.length == 0) {
                     // If no argument, cd to home directory
@@ -47,19 +48,38 @@ public class Main {
                     System.setProperty("user.dir", home);
                 } else {
                     String newPath = argsArr[0];
-                    
-                    // Handle absolute path
-                    File newDir = new File(newPath);
-                    
-                    if (newDir.exists() && newDir.isDirectory()) {
-                        try {
-                            // Change the current working directory
-                            System.setProperty("user.dir", newDir.getCanonicalPath());
-                        } catch (IOException e) {
-                            System.out.println("cd: " + newPath + ": Error changing directory");
+
+                    try {
+                        // Get the current working directory
+                        String currentDir = System.getProperty("user.dir");
+
+                        // Create a File object for the new path
+                        File newDir;
+
+                        // Handle ~ (home directory)
+                        if (newPath.startsWith("~")) {
+                            String home = System.getProperty("user.home");
+                            if (newPath.equals("~")) {
+                                newDir = new File(home);
+                            } else {
+                                // ~/something format
+                                newDir = new File(home + newPath.substring(1));
+                            }
+                        } else {
+                            // For relative paths, resolve against current directory
+                            newDir = new File(currentDir, newPath);
                         }
-                    } else {
-                        System.out.println("cd: " + newPath + ": No such file or directory");
+
+                        // Check if the directory exists and is a directory
+                        if (newDir.exists() && newDir.isDirectory()) {
+                            // Change to the resolved absolute path
+                            System.setProperty("user.dir", newDir.getCanonicalPath());
+                        } else {
+                            System.out.println("cd: " + newPath + ": No such file or directory");
+                        }
+
+                    } catch (IOException e) {
+                        System.out.println("cd: " + newPath + ": Error changing directory");
                     }
                 }
                 continue;
@@ -83,7 +103,6 @@ public class Main {
                 continue;
             }
 
-            // external command execution
             String path = findExecutable(command);
 
             if (path != null) {
@@ -117,10 +136,9 @@ public class Main {
         try {
             List<String> cmd = new ArrayList<>();
 
-            // Only add the command name, NOT the full path
+            // this is to make sure that Only add the command name, NOT the full path
             cmd.add(command);
-            
-            // Add the rest of the arguments
+
             cmd.addAll(Arrays.asList(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
