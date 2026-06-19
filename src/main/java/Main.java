@@ -15,9 +15,9 @@ public class Main {
 
             String input = sc.nextLine().trim();
 
-            if (input.equals("exit 0")) {
-                break;
-            }
+            if (input.equals("exit") || input.equals("exit 0")) {
+    return;
+}
 
             if (input.startsWith("echo ")) {
                 System.out.println(input.substring(5));
@@ -35,7 +35,6 @@ public class Main {
                 continue;
             }
 
-            // ✅ FIX IS HERE
             if (!input.isEmpty()) {
                 System.out.println(input + ": command not found");
             }
