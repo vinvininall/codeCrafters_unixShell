@@ -16,8 +16,8 @@ public class Main {
             String input = sc.nextLine().trim();
 
             if (input.equals("exit") || input.equals("exit 0")) {
-    return;
-}
+                return;
+            }
 
             if (input.startsWith("echo ")) {
                 System.out.println(input.substring(5));
@@ -30,7 +30,13 @@ public class Main {
                 if (builtins.contains(cmd)) {
                     System.out.println(cmd + " is a shell builtin");
                 } else {
-                    System.out.println(cmd + ": not found");
+                    String path = findExecutable(cmd);
+
+                    if (path != null) {
+                        System.out.println(cmd + " is " + path);
+                    } else {
+                        System.out.println(cmd + ": not found");
+                    }
                 }
                 continue;
             }
@@ -39,5 +45,23 @@ public class Main {
                 System.out.println(input + ": command not found");
             }
         }
+    }
+
+    static String findExecutable(String command) {
+        String pathEnv = System.getenv("PATH");
+
+        if (pathEnv == null) return null;
+
+        String[] paths = pathEnv.split(":"); // Linux-style PATH (required for tests)
+
+        for (String pathDir : paths) {
+            java.io.File file = new java.io.File(pathDir + "/" + command);
+
+            if (file.exists() && file.canExecute()) {
+                return file.getAbsolutePath();
+            }
+        }
+
+        return null;
     }
 }
