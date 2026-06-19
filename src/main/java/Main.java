@@ -1,20 +1,43 @@
-import java.util.Scanner;
+import java.util.*;
 
 public class Main {
-    public static void main(String[] args) throws Exception {
+
+    static Set<String> builtins = new HashSet<>(
+            Arrays.asList("echo", "exit", "type")
+    );
+
+    public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
+
         while (true) {
             System.out.print("$ ");
-            String input = sc.nextLine();
-            if(input.equals("exit")){
+            System.out.flush();
+
+            String input = sc.nextLine().trim();
+
+            if (input.equals("exit 0")) {
                 break;
             }
-            else if(input.startsWith(("echo"))){
-                // echo is used to print a line as it is...if it begins with echo , we print
+
+            if (input.startsWith("echo ")) {
                 System.out.println(input.substring(5));
+                continue;
             }
-            else{
-            System.out.println(input + ": command not found");
+
+            if (input.startsWith("type ")) {
+                String cmd = input.substring(5).trim();
+
+                if (builtins.contains(cmd)) {
+                    System.out.println(cmd + " is a shell builtin");
+                } else {
+                    System.out.println(cmd + ": not found");
+                }
+                continue;
+            }
+
+            // ✅ FIX IS HERE
+            if (!input.isEmpty()) {
+                System.out.println(input + ": command not found");
             }
         }
     }
