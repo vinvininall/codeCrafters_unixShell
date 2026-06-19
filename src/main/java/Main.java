@@ -39,52 +39,57 @@ public class Main {
                 continue;
             }
 
-            // cd builtin
-            // cd builtin
-            if (command.equals("cd")) {
-                if (argsArr.length == 0) {
-                    // If no argument, cd to home directory
-                    String home = System.getProperty("user.home");
-                    System.setProperty("user.dir", home);
+// cd builtin
+if (command.equals("cd")) {
+    if (argsArr.length == 0) {
+        // If no argument, cd to home directory
+        String home = System.getProperty("user.home");
+        System.setProperty("user.dir", home);
+    } else {
+        String newPath = argsArr[0];
+        
+        try {
+            // Get the current working directory
+            String currentDir = System.getProperty("user.dir");
+            
+            // Create a File object for the new path
+            File newDir;
+            
+            // Handle ~ (home directory)
+            if (newPath.startsWith("~")) {
+                String home = System.getProperty("user.home");
+                if (newPath.equals("~")) {
+                    newDir = new File(home);
                 } else {
-                    String newPath = argsArr[0];
-
-                    try {
-                        // Get the current working directory
-                        String currentDir = System.getProperty("user.dir");
-
-                        // Create a File object for the new path
-                        File newDir;
-
-                        // Handle ~ (home directory)
-                        if (newPath.startsWith("~")) {
-                            String home = System.getProperty("user.home");
-                            if (newPath.equals("~")) {
-                                newDir = new File(home);
-                            } else {
-                                // ~/something format
-                                newDir = new File(home + newPath.substring(1));
-                            }
-                        } else {
-                            // For relative paths, resolve against current directory
-                            newDir = new File(currentDir, newPath);
-                        }
-
-                        // Check if the directory exists and is a directory
-                        if (newDir.exists() && newDir.isDirectory()) {
-                            // Change to the resolved absolute path
-                            System.setProperty("user.dir", newDir.getCanonicalPath());
-                        } else {
-                            System.out.println("cd: " + newPath + ": No such file or directory");
-                        }
-
-                    } catch (IOException e) {
-                        System.out.println("cd: " + newPath + ": Error changing directory");
-                    }
+                    // ~/something format
+                    newDir = new File(home + newPath.substring(1));
                 }
-                continue;
+            } else if (newPath.startsWith("/")) {
+                // Absolute path
+                newDir = new File(newPath);
+            } else {
+                // Relative path
+                newDir = new File(currentDir, newPath);
             }
-
+            
+            // Get the canonical path (resolves .., ., symlinks)
+            String canonicalPath = newDir.getCanonicalPath();
+            File canonicalFile = new File(canonicalPath);
+            
+            // Check if the directory exists and is a directory
+            if (canonicalFile.exists() && canonicalFile.isDirectory()) {
+                // Change to the resolved absolute path
+                System.setProperty("user.dir", canonicalPath);
+            } else {
+                System.out.println("cd: " + newPath + ": No such file or directory");
+            }
+            
+        } catch (IOException e) {
+            System.out.println("cd: " + newPath + ": Error changing directory");
+        }
+    }
+    continue;
+}
             // type builtin
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
