@@ -1,10 +1,10 @@
 import java.util.*;
+import java.io.*;
 
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type")
-    );
+            Arrays.asList("echo", "exit", "type"));
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -19,13 +19,22 @@ public class Main {
                 return;
             }
 
-            if (input.startsWith("echo ")) {
-                System.out.println(input.substring(5));
+            if (input.isEmpty())
+                continue;
+
+            String[] parts = input.split(" ");
+            String command = parts[0];
+            String[] argsArr = Arrays.copyOfRange(parts, 1, parts.length);
+
+            // echo builtin
+            if (command.equals("echo")) {
+                System.out.println(String.join(" ", argsArr));
                 continue;
             }
 
-            if (input.startsWith("type ")) {
-                String cmd = input.substring(5).trim();
+            // type builtin
+            if (command.equals("type")) {
+                String cmd = argsArr.length > 0 ? argsArr[0] : "";
 
                 if (builtins.contains(cmd)) {
                     System.out.println(cmd + " is a shell builtin");
@@ -41,8 +50,13 @@ public class Main {
                 continue;
             }
 
-            if (!input.isEmpty()) {
-                System.out.println(input + ": command not found");
+            // external command execution
+            String path = findExecutable(command);
+
+            if (path != null) {
+                executeExternal(command, path, argsArr);
+            } else {
+                System.out.println(command + ": command not found");
             }
         }
     }
@@ -50,12 +64,13 @@ public class Main {
     static String findExecutable(String command) {
         String pathEnv = System.getenv("PATH");
 
-        if (pathEnv == null) return null;
+        if (pathEnv == null)
+            return null;
 
-        String[] paths = pathEnv.split(":"); // Linux-style PATH (required for tests)
+        String[] paths = pathEnv.split(":");
 
         for (String pathDir : paths) {
-            java.io.File file = new java.io.File(pathDir + "/" + command);
+            File file = new File(pathDir + "/" + command);
 
             if (file.exists() && file.canExecute()) {
                 return file.getAbsolutePath();
@@ -64,4 +79,25 @@ public class Main {
 
         return null;
     }
+static void executeExternal(String command, String path, String[] args) {
+    try {
+        List<String> cmd = new ArrayList<>();
+
+        // Only add the command name, NOT the full path
+        // The OS will find the executable via PATH
+        cmd.add(command);
+        
+        // Add the rest of the arguments
+        cmd.addAll(Arrays.asList(args));
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.inheritIO();
+
+        Process process = pb.start();
+        process.waitFor();
+
+    } catch (Exception e) {
+        System.out.println("Error executing command: " + e.getMessage());
+    }
+}
 }
