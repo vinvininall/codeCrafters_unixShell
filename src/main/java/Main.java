@@ -257,11 +257,9 @@ public class Main {
                 parent.mkdirs();
             }
             
-            // Create empty file
             if (!file.exists()) {
                 file.createNewFile();
             }
-            // If file exists, we don't need to do anything (it's already empty)
         } catch (IOException e) {
             System.err.println("Error creating file: " + e.getMessage());
         }
@@ -296,28 +294,24 @@ public class Main {
         while (i < input.length()) {
             char c = input.charAt(i);
             
-            // Handle single quotes (higher precedence than double quotes)
             if (c == '\'' && !inDoubleQuotes) {
                 inSingleQuotes = !inSingleQuotes;
                 i++;
                 continue;
             }
             
-            // Handle double quotes
             if (c == '"' && !inSingleQuotes) {
                 inDoubleQuotes = !inDoubleQuotes;
                 i++;
                 continue;
             }
             
-            // Inside single quotes - everything is literal
             if (inSingleQuotes) {
                 currentToken.append(c);
                 i++;
                 continue;
             }
             
-            // Inside double quotes - handle backslash escaping
             if (inDoubleQuotes) {
                 if (c == '\\') {
                     if (i + 1 < input.length()) {
@@ -340,7 +334,6 @@ public class Main {
                 continue;
             }
             
-            // Outside quotes - handle backslash escaping
             if (c == '\\') {
                 if (i + 1 < input.length()) {
                     char nextChar = input.charAt(i + 1);
@@ -353,7 +346,6 @@ public class Main {
                 continue;
             }
             
-            // Outside quotes
             if (c == ' ' || c == '\t') {
                 if (currentToken.length() > 0) {
                     tokens.add(currentToken.toString());
@@ -363,7 +355,6 @@ public class Main {
                 continue;
             }
             
-            // Regular character
             currentToken.append(c);
             i++;
         }
@@ -412,7 +403,6 @@ public class Main {
                 }
                 
                 if (redirectStdout && redirectStderr) {
-                    // Redirect both stdout and stderr to the same file
                     if (appendMode) {
                         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
                         pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
@@ -421,7 +411,6 @@ public class Main {
                         pb.redirectError(file);
                     }
                 } else if (redirectStdout) {
-                    // Redirect stdout to file, stderr to terminal
                     if (appendMode) {
                         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
                     } else {
@@ -429,7 +418,6 @@ public class Main {
                     }
                     pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                 } else if (redirectStderr) {
-                    // Redirect stderr to file, stdout to terminal
                     pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
                     if (appendMode) {
                         pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
@@ -438,7 +426,6 @@ public class Main {
                     }
                 }
             } else {
-                // Inherit both stdout and stderr
                 pb.inheritIO();
             }
 
