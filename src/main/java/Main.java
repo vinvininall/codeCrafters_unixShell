@@ -4,7 +4,7 @@ import java.io.*;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type", "pwd"));
+            Arrays.asList("echo", "exit", "type", "pwd", "cd"));  // Add "cd" here
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -39,6 +39,33 @@ public class Main {
                 continue;
             }
 
+            // cd builtin
+            if (command.equals("cd")) {
+                if (argsArr.length == 0) {
+                    // If no argument, cd to home directory
+                    String home = System.getProperty("user.home");
+                    System.setProperty("user.dir", home);
+                } else {
+                    String newPath = argsArr[0];
+                    
+                    // Handle absolute path
+                    File newDir = new File(newPath);
+                    
+                    if (newDir.exists() && newDir.isDirectory()) {
+                        try {
+                            // Change the current working directory
+                            System.setProperty("user.dir", newDir.getCanonicalPath());
+                        } catch (IOException e) {
+                            System.out.println("cd: " + newPath + ": Error changing directory");
+                        }
+                    } else {
+                        System.out.println("cd: " + newPath + ": No such file or directory");
+                    }
+                }
+                continue;
+            }
+
+            // type builtin
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
 
@@ -56,6 +83,7 @@ public class Main {
                 continue;
             }
 
+            // external command execution
             String path = findExecutable(command);
 
             if (path != null) {
@@ -89,8 +117,10 @@ public class Main {
         try {
             List<String> cmd = new ArrayList<>();
 
+            // Only add the command name, NOT the full path
             cmd.add(command);
             
+            // Add the rest of the arguments
             cmd.addAll(Arrays.asList(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
