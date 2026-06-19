@@ -49,7 +49,6 @@ public class Main {
             // cd builtin
             if (command.equals("cd")) {
                 if (argsArr.length == 0) {
-                    // If no argument, cd to home directory
                     String home = System.getenv("HOME");
                     if (home == null) {
                         home = System.getProperty("user.home");
@@ -59,13 +58,9 @@ public class Main {
                     String newPath = argsArr[0];
                     
                     try {
-                        // Get the current working directory
                         String currentDir = System.getProperty("user.dir");
-                        
-                        // Create a File object for the new path
                         File newDir;
                         
-                        // Handle ~ (home directory)
                         if (newPath.startsWith("~")) {
                             String home = System.getenv("HOME");
                             if (home == null) {
@@ -134,21 +129,28 @@ public class Main {
         List<String> tokens = new ArrayList<>();
         StringBuilder currentToken = new StringBuilder();
         boolean inSingleQuotes = false;
-        boolean inDoubleQuotes = false; // For future expansion
+        boolean inDoubleQuotes = false;
         int i = 0;
         
         while (i < input.length()) {
             char c = input.charAt(i);
             
+            // Handle single quotes (higher precedence than double quotes)
             if (c == '\'' && !inDoubleQuotes) {
-                // Toggle single quotes
                 inSingleQuotes = !inSingleQuotes;
                 i++;
                 continue;
             }
             
-            if (inSingleQuotes) {
-                // Inside single quotes, take everything literally
+            // Handle double quotes
+            if (c == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes;
+                i++;
+                continue;
+            }
+            
+            // Inside quotes, take everything literally (for this stage)
+            if (inSingleQuotes || inDoubleQuotes) {
                 currentToken.append(c);
                 i++;
                 continue;
@@ -201,10 +203,7 @@ public class Main {
         try {
             List<String> cmd = new ArrayList<>();
 
-            // Only add the command name, NOT the full path
             cmd.add(command);
-            
-            // Add the rest of the arguments
             cmd.addAll(Arrays.asList(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
