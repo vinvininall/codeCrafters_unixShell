@@ -4,7 +4,7 @@ import java.io.*;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type", "pwd", "cd")); // Add "cd" here
+            Arrays.asList("echo", "exit", "type", "pwd", "cd"));
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -39,57 +39,69 @@ public class Main {
                 continue;
             }
 
-// cd builtin
-if (command.equals("cd")) {
-    if (argsArr.length == 0) {
-        // If no argument, cd to home directory
-        String home = System.getProperty("user.home");
-        System.setProperty("user.dir", home);
-    } else {
-        String newPath = argsArr[0];
-        
-        try {
-            // Get the current working directory
-            String currentDir = System.getProperty("user.dir");
-            
-            // Create a File object for the new path
-            File newDir;
-            
-            // Handle ~ (home directory)
-            if (newPath.startsWith("~")) {
-                String home = System.getProperty("user.home");
-                if (newPath.equals("~")) {
-                    newDir = new File(home);
+            // cd builtin
+            if (command.equals("cd")) {
+                if (argsArr.length == 0) {
+                    // If no argument, cd to home directory
+                    String home = System.getenv("HOME");
+                    if (home == null) {
+                        home = System.getProperty("user.home");
+                    }
+                    System.setProperty("user.dir", home);
                 } else {
-                    // ~/something format
-                    newDir = new File(home + newPath.substring(1));
+                    String newPath = argsArr[0];
+                    
+                    try {
+                        // Get the current working directory
+                        String currentDir = System.getProperty("user.dir");
+                        
+                        // Create a File object for the new path
+                        File newDir;
+                        
+                        // Handle ~ (home directory)
+                        if (newPath.startsWith("~")) {
+                            String home = System.getenv("HOME");
+                            if (home == null) {
+                                home = System.getProperty("user.home");
+                            }
+                            
+                            if (newPath.equals("~")) {
+                                // Just ~ - go to home directory
+                                newDir = new File(home);
+                            } else if (newPath.startsWith("~/")) {
+                                // ~/something - go to subdirectory in home
+                                newDir = new File(home + newPath.substring(1));
+                            } else {
+                                // ~username format - for this stage, just handle ~ alone or ~/
+                                newDir = new File(currentDir, newPath);
+                            }
+                        } else if (newPath.startsWith("/")) {
+                            // Absolute path
+                            newDir = new File(newPath);
+                        } else {
+                            // Relative path
+                            newDir = new File(currentDir, newPath);
+                        }
+                        
+                        // Get the canonical path (resolves .., ., symlinks)
+                        String canonicalPath = newDir.getCanonicalPath();
+                        File canonicalFile = new File(canonicalPath);
+                        
+                        // Check if the directory exists and is a directory
+                        if (canonicalFile.exists() && canonicalFile.isDirectory()) {
+                            // Change to the resolved absolute path
+                            System.setProperty("user.dir", canonicalPath);
+                        } else {
+                            System.out.println("cd: " + newPath + ": No such file or directory");
+                        }
+                        
+                    } catch (IOException e) {
+                        System.out.println("cd: " + newPath + ": Error changing directory");
+                    }
                 }
-            } else if (newPath.startsWith("/")) {
-                // Absolute path
-                newDir = new File(newPath);
-            } else {
-                // Relative path
-                newDir = new File(currentDir, newPath);
+                continue;
             }
-            
-            // Get the canonical path (resolves .., ., symlinks)
-            String canonicalPath = newDir.getCanonicalPath();
-            File canonicalFile = new File(canonicalPath);
-            
-            // Check if the directory exists and is a directory
-            if (canonicalFile.exists() && canonicalFile.isDirectory()) {
-                // Change to the resolved absolute path
-                System.setProperty("user.dir", canonicalPath);
-            } else {
-                System.out.println("cd: " + newPath + ": No such file or directory");
-            }
-            
-        } catch (IOException e) {
-            System.out.println("cd: " + newPath + ": Error changing directory");
-        }
-    }
-    continue;
-}
+
             // type builtin
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
@@ -108,6 +120,7 @@ if (command.equals("cd")) {
                 continue;
             }
 
+            // external command execution
             String path = findExecutable(command);
 
             if (path != null) {
@@ -141,9 +154,10 @@ if (command.equals("cd")) {
         try {
             List<String> cmd = new ArrayList<>();
 
-            // this is to make sure that Only add the command name, NOT the full path
+            // Only add the command name, NOT the full path
             cmd.add(command);
-
+            
+            // Add the rest of the arguments
             cmd.addAll(Arrays.asList(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
