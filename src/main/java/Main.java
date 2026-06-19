@@ -156,10 +156,33 @@ public class Main {
                 continue;
             }
             
-            // Inside double quotes - everything is literal (for this stage)
+            // Inside double quotes - handle backslash escaping
             if (inDoubleQuotes) {
-                currentToken.append(c);
-                i++;
+                if (c == '\\') {
+                    // Check if there's a next character
+                    if (i + 1 < input.length()) {
+                        char nextChar = input.charAt(i + 1);
+                        // In double quotes, backslash escapes: ", \, $, `, and newline
+                        // For this stage, we handle " and \
+                        if (nextChar == '"' || nextChar == '\\') {
+                            // Escape the character - add it literally and skip both
+                            currentToken.append(nextChar);
+                            i += 2;
+                        } else {
+                            // For other characters, backslash is literal
+                            currentToken.append(c);
+                            i++;
+                        }
+                    } else {
+                        // Backslash at end of input - treat as literal
+                        currentToken.append(c);
+                        i++;
+                    }
+                } else {
+                    // Regular character inside double quotes
+                    currentToken.append(c);
+                    i++;
+                }
                 continue;
             }
             
