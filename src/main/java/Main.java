@@ -10,6 +10,7 @@ public class Main {
                 break;
             }
             else if(input.startsWith(("echo"))){
+                // echo is used to print a line as it is...if it begins with echo , we print
                 System.out.println(input.substring(5));
             }
             else{
