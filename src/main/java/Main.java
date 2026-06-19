@@ -28,11 +28,12 @@ public class Main {
             if (tokens.isEmpty())
                 continue;
             
-            // Check for output redirection (> or 1> or 2>)
+            // Check for output redirection (> or >> or 1> or 1>> or 2> or 2>>)
             int redirIndex = -1;
             String outputFile = null;
             boolean redirectStderr = false;
             boolean redirectStdout = false;
+            boolean appendMode = false;
             
             for (int i = 0; i < tokens.size(); i++) {
                 String token = tokens.get(i);
@@ -40,6 +41,16 @@ public class Main {
                     redirIndex = i;
                     redirectStdout = true;
                     redirectStderr = false;
+                    appendMode = false;
+                    if (i + 1 < tokens.size()) {
+                        outputFile = tokens.get(i + 1);
+                    }
+                    break;
+                } else if (token.equals(">>") || token.equals("1>>")) {
+                    redirIndex = i;
+                    redirectStdout = true;
+                    redirectStderr = false;
+                    appendMode = true;
                     if (i + 1 < tokens.size()) {
                         outputFile = tokens.get(i + 1);
                     }
@@ -48,6 +59,16 @@ public class Main {
                     redirIndex = i;
                     redirectStdout = false;
                     redirectStderr = true;
+                    appendMode = false;
+                    if (i + 1 < tokens.size()) {
+                        outputFile = tokens.get(i + 1);
+                    }
+                    break;
+                } else if (token.equals("2>>")) {
+                    redirIndex = i;
+                    redirectStdout = false;
+                    redirectStderr = true;
+                    appendMode = true;
                     if (i + 1 < tokens.size()) {
                         outputFile = tokens.get(i + 1);
                     }
@@ -78,7 +99,7 @@ public class Main {
             if (command.equals("echo")) {
                 String output = String.join(" ", argsArr);
                 if (redirectOutput && redirectStdout) {
-                    writeToFile(outputFile, output);
+                    writeToFile(outputFile, output, appendMode);
                 } else if (redirectOutput && redirectStderr) {
                     // echo doesn't produce stderr, but we should create an empty file
                     createEmptyFile(outputFile);
@@ -94,7 +115,7 @@ public class Main {
             if (command.equals("pwd")) {
                 String cwd = System.getProperty("user.dir");
                 if (redirectOutput && redirectStdout) {
-                    writeToFile(outputFile, cwd);
+                    writeToFile(outputFile, cwd, appendMode);
                 } else if (redirectOutput && redirectStderr) {
                     // pwd doesn't produce stderr, create empty file
                     createEmptyFile(outputFile);
@@ -156,7 +177,7 @@ public class Main {
                         } else {
                             String errorMsg = "cd: " + newPath + ": No such file or directory";
                             if (redirectOutput && redirectStderr) {
-                                writeToFile(outputFile, errorMsg);
+                                writeToFile(outputFile, errorMsg, appendMode);
                             } else if (redirectOutput && redirectStdout) {
                                 // cd error goes to stderr, not stdout
                                 System.err.println(errorMsg);
@@ -168,7 +189,7 @@ public class Main {
                     } catch (IOException e) {
                         String errorMsg = "cd: " + newPath + ": Error changing directory";
                         if (redirectOutput && redirectStderr) {
-                            writeToFile(outputFile, errorMsg);
+                            writeToFile(outputFile, errorMsg, appendMode);
                         } else if (redirectOutput && redirectStdout) {
                             System.err.println(errorMsg);
                         } else {
@@ -197,7 +218,7 @@ public class Main {
                 }
                 
                 if (redirectOutput && redirectStdout) {
-                    writeToFile(outputFile, output);
+                    writeToFile(outputFile, output, appendMode);
                 } else if (redirectOutput && redirectStderr) {
                     // type doesn't produce stderr, create empty file
                     createEmptyFile(outputFile);
@@ -213,11 +234,11 @@ public class Main {
             String path = findExecutable(command);
 
             if (path != null) {
-                executeExternal(command, path, argsArr, redirectStdout, redirectStderr, outputFile);
+                executeExternal(command, path, argsArr, redirectStdout, redirectStderr, outputFile, appendMode);
             } else {
                 String errorMsg = command + ": command not found";
                 if (redirectOutput && redirectStderr) {
-                    writeToFile(outputFile, errorMsg);
+                    writeToFile(outputFile, errorMsg, appendMode);
                 } else if (redirectOutput && redirectStdout) {
                     // Command not found error goes to stderr, not stdout
                     System.err.println(errorMsg);
@@ -246,7 +267,7 @@ public class Main {
         }
     }
 
-    static void writeToFile(String filename, String content) {
+    static void writeToFile(String filename, String content, boolean append) {
         try {
             File file = new File(filename);
             File parent = file.getParentFile();
@@ -254,7 +275,7 @@ public class Main {
                 parent.mkdirs();
             }
             
-            try (FileWriter writer = new FileWriter(file)) {
+            try (FileWriter writer = new FileWriter(file, append)) {
                 writer.write(content);
                 if (!content.endsWith("\n")) {
                     writer.write("\n");
@@ -375,7 +396,7 @@ public class Main {
 
     static void executeExternal(String command, String path, String[] args, 
                                 boolean redirectStdout, boolean redirectStderr, 
-                                String outputFile) {
+                                String outputFile, boolean appendMode) {
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add(command);
@@ -392,16 +413,29 @@ public class Main {
                 
                 if (redirectStdout && redirectStderr) {
                     // Redirect both stdout and stderr to the same file
-                    pb.redirectOutput(file);
-                    pb.redirectError(file);
+                    if (appendMode) {
+                        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
+                        pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
+                    } else {
+                        pb.redirectOutput(file);
+                        pb.redirectError(file);
+                    }
                 } else if (redirectStdout) {
                     // Redirect stdout to file, stderr to terminal
-                    pb.redirectOutput(file);
+                    if (appendMode) {
+                        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
+                    } else {
+                        pb.redirectOutput(file);
+                    }
                     pb.redirectError(ProcessBuilder.Redirect.INHERIT);
                 } else if (redirectStderr) {
                     // Redirect stderr to file, stdout to terminal
                     pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                    pb.redirectError(file);
+                    if (appendMode) {
+                        pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
+                    } else {
+                        pb.redirectError(file);
+                    }
                 }
             } else {
                 // Inherit both stdout and stderr
