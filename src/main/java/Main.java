@@ -4,7 +4,7 @@ import java.io.*;
 public class Main {
 
     static Set<String> builtins = new HashSet<>(
-            Arrays.asList("echo", "exit", "type"));
+            Arrays.asList("echo", "exit", "type", "pwd"));
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -32,7 +32,13 @@ public class Main {
                 continue;
             }
 
-            // type builtin
+            // pwd builtin
+            if (command.equals("pwd")) {
+                String cwd = System.getProperty("user.dir");
+                System.out.println(cwd);
+                continue;
+            }
+
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
 
@@ -50,7 +56,6 @@ public class Main {
                 continue;
             }
 
-            // external command execution
             String path = findExecutable(command);
 
             if (path != null) {
@@ -79,25 +84,23 @@ public class Main {
 
         return null;
     }
-static void executeExternal(String command, String path, String[] args) {
-    try {
-        List<String> cmd = new ArrayList<>();
 
-        // Only add the command name, NOT the full path
-        // The OS will find the executable via PATH
-        cmd.add(command);
-        
-        // Add the rest of the arguments
-        cmd.addAll(Arrays.asList(args));
+    static void executeExternal(String command, String path, String[] args) {
+        try {
+            List<String> cmd = new ArrayList<>();
 
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.inheritIO();
+            cmd.add(command);
+            
+            cmd.addAll(Arrays.asList(args));
 
-        Process process = pb.start();
-        process.waitFor();
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.inheritIO();
 
-    } catch (Exception e) {
-        System.out.println("Error executing command: " + e.getMessage());
+            Process process = pb.start();
+            process.waitFor();
+
+        } catch (Exception e) {
+            System.out.println("Error executing command: " + e.getMessage());
+        }
     }
-}
 }
