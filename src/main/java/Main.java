@@ -96,7 +96,6 @@ public class Main {
                 continue;
             }
 
-            // type builtin
             if (command.equals("type")) {
                 String cmd = argsArr.length > 0 ? argsArr[0] : "";
 
@@ -113,8 +112,6 @@ public class Main {
                 }
                 continue;
             }
-
-            // external command execution
             String path = findExecutable(command);
 
             if (path != null) {
@@ -135,30 +132,40 @@ public class Main {
         while (i < input.length()) {
             char c = input.charAt(i);
             
-            // Handle single quotes (higher precedence than double quotes)
             if (c == '\'' && !inDoubleQuotes) {
                 inSingleQuotes = !inSingleQuotes;
                 i++;
                 continue;
             }
-            
-            // Handle double quotes
             if (c == '"' && !inSingleQuotes) {
                 inDoubleQuotes = !inDoubleQuotes;
                 i++;
                 continue;
             }
-            
-            // Inside quotes, take everything literally (for this stage)
-            if (inSingleQuotes || inDoubleQuotes) {
+            if (inSingleQuotes) {
+                currentToken.append(c);
+                i++;
+                continue;
+            }
+            if (inDoubleQuotes) {
                 currentToken.append(c);
                 i++;
                 continue;
             }
             
-            // Outside quotes
+            if (c == '\\') {
+                if (i + 1 < input.length()) {
+                    char nextChar = input.charAt(i + 1);
+                    currentToken.append(nextChar);
+                    i += 2; 
+                } else {
+                    currentToken.append(c);
+                    i++;
+                }
+                continue;
+            }
+            
             if (c == ' ' || c == '\t') {
-                // Whitespace - end current token if not empty
                 if (currentToken.length() > 0) {
                     tokens.add(currentToken.toString());
                     currentToken = new StringBuilder();
