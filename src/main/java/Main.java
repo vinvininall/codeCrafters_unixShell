@@ -15,12 +15,14 @@ public class Main {
         String command;
         Process process;
         boolean completed;
+        String status;
 
         BackgroundJob(int id, String command, Process process) {
             this.id = id;
             this.command = command;
             this.process = process;
             this.completed = false;
+            this.status = "Running";
         }
     }
 
@@ -143,27 +145,39 @@ public class Main {
 
             // jobs builtin
             if (command.equals("jobs")) {
-                // Clean up completed jobs and print running ones
+                // Update job statuses and clean up completed jobs
                 List<BackgroundJob> activeJobs = new ArrayList<>();
                 for (BackgroundJob job : backgroundJobs) {
                     if (job.process != null && job.process.isAlive()) {
+                        job.status = "Running";
                         activeJobs.add(job);
                     } else {
                         job.completed = true;
+                        job.status = "Done";
                     }
                 }
                 backgroundJobs = activeJobs;
                 
                 if (!backgroundJobs.isEmpty()) {
-                    for (int i = 0; i < backgroundJobs.size(); i++) {
+                    // List jobs in the order they were started (oldest first)
+                    // The most recent job gets the '+' marker
+                    // The second most recent job gets the '-' marker
+                    int size = backgroundJobs.size();
+                    for (int i = 0; i < size; i++) {
                         BackgroundJob job = backgroundJobs.get(i);
-                        // Format: [jobId]+  Running                 command &
-                        // The + indicates the most recent job
-                        String marker = (i == backgroundJobs.size() - 1) ? "+" : "-";
+                        
+                        // Determine marker
+                        String marker;
+                        if (i == size - 1) {
+                            marker = "+";  // Most recent job
+                        } else if (i == size - 2) {
+                            marker = "-";  // Second most recent job
+                        } else {
+                            marker = " ";  // Older jobs get a space
+                        }
                         
                         // Status field padded to 24 characters total
-                        String status = "Running";
-                        // Pad to 24 characters (7 for "Running" + 17 spaces)
+                        String status = job.status;
                         String paddedStatus = String.format("%-24s", status);
                         
                         // Command with trailing & (to indicate background job)
@@ -416,6 +430,7 @@ public class Main {
                 // Mark job as completed
                 synchronized (backgroundJobs) {
                     job.completed = true;
+                    job.status = "Done";
                 }
                 
             } catch (Exception e) {
