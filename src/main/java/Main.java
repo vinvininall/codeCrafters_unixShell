@@ -147,9 +147,9 @@ public class Main {
 
             // jobs builtin
             if (command.equals("jobs")) {
-                // Check each job's status and reap completed ones
-                List<BackgroundJob> activeJobs = new ArrayList<>();
+                // Check each job's status
                 List<BackgroundJob> completedJobs = new ArrayList<>();
+                List<BackgroundJob> runningJobs = new ArrayList<>();
                 
                 for (BackgroundJob job : backgroundJobs) {
                     if (job.process != null) {
@@ -159,44 +159,36 @@ public class Main {
                             // Process has exited
                             job.completed = true;
                             job.status = "Done";
-                            job.reaped = false;
                             completedJobs.add(job);
                         } catch (IllegalThreadStateException e) {
                             // Process is still running
                             job.status = "Running";
-                            activeJobs.add(job);
+                            runningJobs.add(job);
                         }
                     } else {
                         // Process is null, mark as completed
                         job.completed = true;
                         job.status = "Done";
-                        job.reaped = false;
                         completedJobs.add(job);
                     }
                 }
                 
-                // Display completed jobs with "Done" status first
-                for (BackgroundJob job : completedJobs) {
-                    if (!job.reaped) {
-                        // Format: [jobId]+  Done                    command
-                        // No trailing & for Done jobs
-                        String marker = "+";  // For simplicity, use + for the most recent completed job
-                        String paddedStatus = String.format("%-24s", "Done");
-                        System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + job.command);
-                        job.reaped = true;
-                    }
-                }
+                // Combine both lists and sort by job ID (oldest first)
+                List<BackgroundJob> allJobs = new ArrayList<>();
+                allJobs.addAll(runningJobs);
+                allJobs.addAll(completedJobs);
+                allJobs.sort((a, b) -> Integer.compare(a.id, b.id));
                 
-                // Then display running jobs
-                if (!activeJobs.isEmpty()) {
-                    int size = activeJobs.size();
+                // Display all jobs in order of job number
+                if (!allJobs.isEmpty()) {
+                    int size = allJobs.size();
                     for (int i = 0; i < size; i++) {
-                        BackgroundJob job = activeJobs.get(i);
+                        BackgroundJob job = allJobs.get(i);
                         
-                        // Determine marker
+                        // Determine marker based on position in the sorted list
                         String marker;
                         if (i == size - 1) {
-                            marker = "+";  // Most recent job
+                            marker = "+";  // Most recent job (highest ID)
                         } else if (i == size - 2) {
                             marker = "-";  // Second most recent job
                         } else {
@@ -207,15 +199,18 @@ public class Main {
                         String status = job.status;
                         String paddedStatus = String.format("%-24s", status);
                         
-                        // Command with trailing & (to indicate background job)
-                        String cmdWithBg = job.command + " &";
+                        // Command with trailing & only for Running jobs
+                        String cmdDisplay = job.command;
+                        if (job.status.equals("Running")) {
+                            cmdDisplay = job.command + " &";
+                        }
                         
-                        System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + cmdWithBg);
+                        System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + cmdDisplay);
                     }
                 }
                 
-                // Update the job list to only keep running jobs
-                backgroundJobs = activeJobs;
+                // Only keep running jobs (completed jobs are removed after being displayed once)
+                backgroundJobs = runningJobs;
                 
                 continue;
             }
