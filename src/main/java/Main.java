@@ -57,24 +57,24 @@ public class Main {
 
             // Parse the input into command and arguments with quote support
             List<String> tokens = parseInput(input);
-
+            
             if (tokens.isEmpty())
                 continue;
-
+            
             // Check for background job (&)
             boolean background = false;
             if (!tokens.isEmpty() && tokens.get(tokens.size() - 1).equals("&")) {
                 background = true;
                 tokens.remove(tokens.size() - 1);
             }
-
+            
             // Check for output redirection
             int redirIndex = -1;
             String outputFile = null;
             boolean redirectStderr = false;
             boolean redirectStdout = false;
             boolean appendMode = false;
-
+            
             for (int i = 0; i < tokens.size(); i++) {
                 String token = tokens.get(i);
                 if (token.equals(">") || token.equals("1>")) {
@@ -115,7 +115,7 @@ public class Main {
                     break;
                 }
             }
-
+            
             // Extract command and arguments
             List<String> cmdTokens;
             if (redirIndex != -1) {
@@ -123,13 +123,21 @@ public class Main {
             } else {
                 cmdTokens = tokens;
             }
-
+            
             if (cmdTokens.isEmpty())
                 continue;
-
+                
             String command = cmdTokens.get(0);
-            String[] argsArr = cmdTokens.size() > 1 ? cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0])
-                    : new String[0];
+            String[] argsArr = cmdTokens.size() > 1 ? 
+                cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
+                new String[0];
+
+            // Build the full command string with arguments for display
+            StringBuilder fullCommandBuilder = new StringBuilder(command);
+            for (String arg : argsArr) {
+                fullCommandBuilder.append(" ").append(arg);
+            }
+            String fullCommandString = fullCommandBuilder.toString();
 
             boolean redirectOutput = (redirIndex != -1 && outputFile != null);
 
@@ -145,10 +153,23 @@ public class Main {
                     }
                 }
                 backgroundJobs = activeJobs;
-
+                
                 if (!backgroundJobs.isEmpty()) {
-                    for (BackgroundJob job : backgroundJobs) {
-                        System.out.println("[" + job.id + "]  Running  " + job.command);
+                    for (int i = 0; i < backgroundJobs.size(); i++) {
+                        BackgroundJob job = backgroundJobs.get(i);
+                        // Format: [jobId]+  Running                 command &
+                        // The + indicates the most recent job
+                        String marker = (i == backgroundJobs.size() - 1) ? "+" : "-";
+                        
+                        // Status field padded to 24 characters total
+                        String status = "Running";
+                        // Pad to 24 characters (7 for "Running" + 17 spaces)
+                        String paddedStatus = String.format("%-24s", status);
+                        
+                        // Command with trailing & (to indicate background job)
+                        String cmdWithBg = job.command + " &";
+                        
+                        System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + cmdWithBg);
                     }
                 }
                 // If no jobs, print nothing
@@ -156,22 +177,22 @@ public class Main {
             }
 
             boolean isBuiltin = builtins.contains(command);
-
+            
             if (isBuiltin || !background) {
-                executeCommand(command, argsArr, redirectOutput, redirectStdout,
-                        redirectStderr, outputFile, appendMode, background, isBuiltin);
+                executeCommand(command, argsArr, redirectOutput, redirectStdout, 
+                              redirectStderr, outputFile, appendMode, background, isBuiltin);
             } else {
                 // Run external command in background
-                runBackgroundJob(command, argsArr, redirectOutput, redirectStdout,
-                        redirectStderr, outputFile, appendMode);
+                runBackgroundJob(command, argsArr, fullCommandString, redirectOutput, redirectStdout, 
+                               redirectStderr, outputFile, appendMode);
             }
         }
     }
 
-    static void executeCommand(String command, String[] argsArr,
-            boolean redirectOutput, boolean redirectStdout,
-            boolean redirectStderr, String outputFile,
-            boolean appendMode, boolean background, boolean isBuiltin) {
+    static void executeCommand(String command, String[] argsArr, 
+                               boolean redirectOutput, boolean redirectStdout,
+                               boolean redirectStderr, String outputFile, 
+                               boolean appendMode, boolean background, boolean isBuiltin) {
         // echo builtin
         if (command.equals("echo")) {
             String output = String.join(" ", argsArr);
@@ -213,17 +234,17 @@ public class Main {
                 }
             } else {
                 String newPath = argsArr[0];
-
+                
                 try {
                     String currentDir = System.getProperty("user.dir");
                     File newDir;
-
+                    
                     if (newPath.startsWith("~")) {
                         String home = System.getenv("HOME");
                         if (home == null) {
                             home = System.getProperty("user.home");
                         }
-
+                        
                         if (newPath.equals("~")) {
                             newDir = new File(home);
                         } else if (newPath.startsWith("~/")) {
@@ -236,10 +257,10 @@ public class Main {
                     } else {
                         newDir = new File(currentDir, newPath);
                     }
-
+                    
                     String canonicalPath = newDir.getCanonicalPath();
                     File canonicalFile = new File(canonicalPath);
-
+                    
                     if (canonicalFile.exists() && canonicalFile.isDirectory()) {
                         System.setProperty("user.dir", canonicalPath);
                         if (redirectOutput && redirectStderr) {
@@ -255,7 +276,7 @@ public class Main {
                             System.out.println(errorMsg);
                         }
                     }
-
+                    
                 } catch (IOException e) {
                     String errorMsg = "cd: " + newPath + ": Error changing directory";
                     if (redirectOutput && redirectStderr) {
@@ -286,7 +307,7 @@ public class Main {
                     output = cmd + ": not found";
                 }
             }
-
+            
             if (redirectOutput && redirectStdout) {
                 writeToFile(outputFile, output, appendMode);
             } else if (redirectOutput && redirectStderr) {
@@ -302,8 +323,8 @@ public class Main {
         String path = findExecutable(command);
 
         if (path != null) {
-            executeExternal(command, path, argsArr, redirectStdout, redirectStderr,
-                    outputFile, appendMode, background);
+            executeExternal(command, path, argsArr, redirectStdout, redirectStderr, 
+                           outputFile, appendMode, background);
         } else {
             String errorMsg = command + ": command not found";
             if (redirectOutput && redirectStderr) {
@@ -316,23 +337,23 @@ public class Main {
         }
     }
 
-    static void runBackgroundJob(String command, String[] argsArr,
-            boolean redirectOutput, boolean redirectStdout,
-            boolean redirectStderr, String outputFile,
-            boolean appendMode) {
+    static void runBackgroundJob(String command, String[] argsArr, String fullCommandString,
+                                 boolean redirectOutput, boolean redirectStdout,
+                                 boolean redirectStderr, String outputFile, 
+                                 boolean appendMode) {
         String path = findExecutable(command);
-
+        
         if (path == null) {
             System.out.println(command + ": command not found");
             return;
         }
-
+        
         // Create a new job ID (sequential starting from 1)
         int jobId = ++jobCounter;
-
+        
         // Use a latch to wait for the PID to be printed
         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-
+        
         Thread backgroundThread = new Thread(() -> {
             try {
                 List<String> cmd = new ArrayList<>();
@@ -340,14 +361,14 @@ public class Main {
                 cmd.addAll(Arrays.asList(argsArr));
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
-
+                
                 if (outputFile != null && (redirectStdout || redirectStderr)) {
                     File file = new File(outputFile);
                     File parent = file.getParentFile();
                     if (parent != null && !parent.exists()) {
                         parent.mkdirs();
                     }
-
+                    
                     if (redirectStdout && redirectStderr) {
                         if (appendMode) {
                             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
@@ -377,35 +398,35 @@ public class Main {
                 }
 
                 Process process = pb.start();
-
-                // Store the job
-                BackgroundJob job = new BackgroundJob(jobId, command, process);
+                
+                // Store the job with the full command string
+                BackgroundJob job = new BackgroundJob(jobId, fullCommandString, process);
                 synchronized (backgroundJobs) {
                     backgroundJobs.add(job);
                 }
-
+                
                 // Print the job notification: [jobId] pid
                 System.out.println("[" + jobId + "] " + process.pid());
-
+                
                 // Signal that the PID has been printed
                 latch.countDown();
-
+                
                 process.waitFor();
-
+                
                 // Mark job as completed
                 synchronized (backgroundJobs) {
                     job.completed = true;
                 }
-
+                
             } catch (Exception e) {
                 System.err.println("Error in background job: " + e.getMessage());
                 latch.countDown(); // Ensure we don't block forever
             }
         });
-
+        
         backgroundThread.setDaemon(true);
         backgroundThread.start();
-
+        
         // Wait for the PID to be printed before continuing
         try {
             latch.await();
@@ -421,7 +442,7 @@ public class Main {
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
-
+            
             if (!file.exists()) {
                 file.createNewFile();
             }
@@ -437,7 +458,7 @@ public class Main {
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
-
+            
             try (FileWriter writer = new FileWriter(file, append)) {
                 writer.write(content);
                 if (!content.endsWith("\n")) {
@@ -455,28 +476,28 @@ public class Main {
         boolean inSingleQuotes = false;
         boolean inDoubleQuotes = false;
         int i = 0;
-
+        
         while (i < input.length()) {
             char c = input.charAt(i);
-
+            
             if (c == '\'' && !inDoubleQuotes) {
                 inSingleQuotes = !inSingleQuotes;
                 i++;
                 continue;
             }
-
+            
             if (c == '"' && !inSingleQuotes) {
                 inDoubleQuotes = !inDoubleQuotes;
                 i++;
                 continue;
             }
-
+            
             if (inSingleQuotes) {
                 currentToken.append(c);
                 i++;
                 continue;
             }
-
+            
             if (inDoubleQuotes) {
                 if (c == '\\') {
                     if (i + 1 < input.length()) {
@@ -498,6 +519,7 @@ public class Main {
                 }
                 continue;
             }
+            
             if (c == '\\') {
                 if (i + 1 < input.length()) {
                     char nextChar = input.charAt(i + 1);
@@ -509,6 +531,7 @@ public class Main {
                 }
                 continue;
             }
+            
             if (c == ' ' || c == '\t') {
                 if (currentToken.length() > 0) {
                     tokens.add(currentToken.toString());
@@ -517,14 +540,15 @@ public class Main {
                 i++;
                 continue;
             }
-
+            
             currentToken.append(c);
             i++;
         }
+        
         if (currentToken.length() > 0) {
             tokens.add(currentToken.toString());
         }
-
+        
         return tokens;
     }
 
@@ -543,25 +567,28 @@ public class Main {
                 return file.getAbsolutePath();
             }
         }
+
         return null;
     }
 
-    static void executeExternal(String command, String path, String[] args,
-            boolean redirectStdout, boolean redirectStderr,
-            String outputFile, boolean appendMode,
-            boolean background) {
+    static void executeExternal(String command, String path, String[] args, 
+                                boolean redirectStdout, boolean redirectStderr, 
+                                String outputFile, boolean appendMode, 
+                                boolean background) {
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add(command);
             cmd.addAll(Arrays.asList(args));
+
             ProcessBuilder pb = new ProcessBuilder(cmd);
+            
             if (outputFile != null && (redirectStdout || redirectStderr)) {
                 File file = new File(outputFile);
                 File parent = file.getParentFile();
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-
+                
                 if (redirectStdout && redirectStderr) {
                     if (appendMode) {
                         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(file));
@@ -588,8 +615,10 @@ public class Main {
             } else {
                 pb.inheritIO();
             }
+
             Process process = pb.start();
             process.waitFor();
+
         } catch (Exception e) {
             System.err.println("Error executing command: " + e.getMessage());
         }
