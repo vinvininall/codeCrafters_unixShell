@@ -16,6 +16,7 @@ public class Main {
         Process process;
         boolean completed;
         String status;
+        boolean reaped;
 
         BackgroundJob(int id, String command, Process process) {
             this.id = id;
@@ -23,6 +24,7 @@ public class Main {
             this.process = process;
             this.completed = false;
             this.status = "Running";
+            this.reaped = false;
         }
     }
 
@@ -145,26 +147,51 @@ public class Main {
 
             // jobs builtin
             if (command.equals("jobs")) {
-                // Update job statuses and clean up completed jobs
+                // Check each job's status and reap completed ones
                 List<BackgroundJob> activeJobs = new ArrayList<>();
+                List<BackgroundJob> completedJobs = new ArrayList<>();
+                
                 for (BackgroundJob job : backgroundJobs) {
-                    if (job.process != null && job.process.isAlive()) {
-                        job.status = "Running";
-                        activeJobs.add(job);
+                    if (job.process != null) {
+                        try {
+                            // Check if the process has exited (without blocking)
+                            int exitCode = job.process.exitValue();
+                            // Process has exited
+                            job.completed = true;
+                            job.status = "Done";
+                            job.reaped = false;
+                            completedJobs.add(job);
+                        } catch (IllegalThreadStateException e) {
+                            // Process is still running
+                            job.status = "Running";
+                            activeJobs.add(job);
+                        }
                     } else {
+                        // Process is null, mark as completed
                         job.completed = true;
                         job.status = "Done";
+                        job.reaped = false;
+                        completedJobs.add(job);
                     }
                 }
-                backgroundJobs = activeJobs;
                 
-                if (!backgroundJobs.isEmpty()) {
-                    // List jobs in the order they were started (oldest first)
-                    // The most recent job gets the '+' marker
-                    // The second most recent job gets the '-' marker
-                    int size = backgroundJobs.size();
+                // Display completed jobs with "Done" status first
+                for (BackgroundJob job : completedJobs) {
+                    if (!job.reaped) {
+                        // Format: [jobId]+  Done                    command
+                        // No trailing & for Done jobs
+                        String marker = "+";  // For simplicity, use + for the most recent completed job
+                        String paddedStatus = String.format("%-24s", "Done");
+                        System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + job.command);
+                        job.reaped = true;
+                    }
+                }
+                
+                // Then display running jobs
+                if (!activeJobs.isEmpty()) {
+                    int size = activeJobs.size();
                     for (int i = 0; i < size; i++) {
-                        BackgroundJob job = backgroundJobs.get(i);
+                        BackgroundJob job = activeJobs.get(i);
                         
                         // Determine marker
                         String marker;
@@ -186,7 +213,10 @@ public class Main {
                         System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + cmdWithBg);
                     }
                 }
-                // If no jobs, print nothing
+                
+                // Update the job list to only keep running jobs
+                backgroundJobs = activeJobs;
+                
                 continue;
             }
 
@@ -427,7 +457,7 @@ public class Main {
                 
                 process.waitFor();
                 
-                // Mark job as completed
+                // Mark job as completed (will be reaped on next jobs call)
                 synchronized (backgroundJobs) {
                     job.completed = true;
                     job.status = "Done";
