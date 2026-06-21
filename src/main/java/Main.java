@@ -83,29 +83,37 @@ public class Main {
                 continue;
             
             // Check for pipeline
-            int pipeIndex = -1;
+            List<Integer> pipeIndices = new ArrayList<>();
             for (int i = 0; i < tokens.size(); i++) {
                 if (tokens.get(i).equals("|")) {
-                    pipeIndex = i;
-                    break;
+                    pipeIndices.add(i);
                 }
             }
             
             // If there's a pipeline, handle it
-            if (pipeIndex != -1) {
-                // Split tokens into left and right commands
-                List<String> leftTokens = tokens.subList(0, pipeIndex);
-                List<String> rightTokens = tokens.subList(pipeIndex + 1, tokens.size());
-                
-                // Remove background job indicator from the right command if present
-                boolean background = false;
-                if (!rightTokens.isEmpty() && rightTokens.get(rightTokens.size() - 1).equals("&")) {
-                    background = true;
-                    rightTokens.remove(rightTokens.size() - 1);
+            if (!pipeIndices.isEmpty()) {
+                // Split tokens into multiple commands
+                List<List<String>> commandTokens = new ArrayList<>();
+                int start = 0;
+                for (int pipeIndex : pipeIndices) {
+                    commandTokens.add(tokens.subList(start, pipeIndex));
+                    start = pipeIndex + 1;
+                }
+                // Add the last command
+                if (start < tokens.size()) {
+                    commandTokens.add(tokens.subList(start, tokens.size()));
                 }
                 
-                // Execute the pipeline
-                executePipeline(leftTokens, rightTokens, background);
+                // Check for background job indicator on the last command
+                boolean background = false;
+                List<String> lastCmd = commandTokens.get(commandTokens.size() - 1);
+                if (!lastCmd.isEmpty() && lastCmd.get(lastCmd.size() - 1).equals("&")) {
+                    background = true;
+                    lastCmd.remove(lastCmd.size() - 1);
+                }
+                
+                // Execute the multi-stage pipeline
+                executeMultiPipeline(commandTokens, background);
                 
                 // Reap completed jobs after pipeline
                 reapCompletedJobs();
@@ -265,125 +273,229 @@ public class Main {
         }
     }
 
-    static void executePipeline(List<String> leftTokens, List<String> rightTokens, boolean background) {
+    static void executeMultiPipeline(List<List<String>> commandTokens, boolean background) {
+        if (commandTokens.size() < 2) {
+            return;
+        }
+        
         try {
-            // Parse left command
-            if (leftTokens.isEmpty() || rightTokens.isEmpty()) {
-                System.out.println("Invalid pipeline");
-                return;
-            }
+            int numCommands = commandTokens.size();
+            List<Process> processes = new ArrayList<>();
+            List<Thread> pipeThreads = new ArrayList<>();
+            List<ProcessBuilder> processBuilders = new ArrayList<>();
             
-            String leftCommand = leftTokens.get(0);
-            String[] leftArgs = leftTokens.size() > 1 ? 
-                leftTokens.subList(1, leftTokens.size()).toArray(new String[0]) : 
-                new String[0];
-            
-            String rightCommand = rightTokens.get(0);
-            String[] rightArgs = rightTokens.size() > 1 ? 
-                rightTokens.subList(1, rightTokens.size()).toArray(new String[0]) : 
-                new String[0];
-            
-            // Check if commands are builtins
-            boolean leftIsBuiltin = builtins.contains(leftCommand);
-            boolean rightIsBuiltin = builtins.contains(rightCommand);
-            
-            // Handle pipeline with builtins
-            if (leftIsBuiltin && rightIsBuiltin) {
-                // Both are builtins - execute left, capture output, pipe to right
-                String leftOutput = executeBuiltinForPipeline(leftCommand, leftArgs);
-                String rightOutput = executeBuiltinForPipeline(rightCommand, rightArgs, leftOutput);
-                if (rightOutput != null && !rightOutput.isEmpty()) {
-                    System.out.print(rightOutput);
-                }
-                return;
-            } else if (leftIsBuiltin) {
-                // Left is builtin, right is external
-                String leftOutput = executeBuiltinForPipeline(leftCommand, leftArgs);
-                if (leftOutput == null) {
+            // Create ProcessBuilders for each command
+            for (List<String> cmdTokens : commandTokens) {
+                if (cmdTokens.isEmpty()) {
+                    System.out.println("Invalid pipeline");
                     return;
                 }
-                // Pipe left output to right command
-                executeExternalWithInput(rightCommand, rightArgs, leftOutput);
-                return;
-            } else if (rightIsBuiltin) {
-                // Left is external, right is builtin
-                String rightOutput = executeExternalWithBuiltinPipe(leftCommand, leftArgs, rightCommand, rightArgs);
-                if (rightOutput != null && !rightOutput.isEmpty()) {
-                    System.out.print(rightOutput);
-                }
-                return;
-            }
-            
-            // Both are external commands - original pipeline logic
-            // Find executables
-            String leftPath = findExecutable(leftCommand);
-            String rightPath = findExecutable(rightCommand);
-            
-            if (leftPath == null) {
-                System.out.println(leftCommand + ": command not found");
-                return;
-            }
-            if (rightPath == null) {
-                System.out.println(rightCommand + ": command not found");
-                return;
-            }
-            
-            // Build ProcessBuilder for both commands
-            List<String> leftCmd = new ArrayList<>();
-            leftCmd.add(leftCommand);
-            leftCmd.addAll(Arrays.asList(leftArgs));
-            
-            List<String> rightCmd = new ArrayList<>();
-            rightCmd.add(rightCommand);
-            rightCmd.addAll(Arrays.asList(rightArgs));
-            
-            ProcessBuilder leftPb = new ProcessBuilder(leftCmd);
-            ProcessBuilder rightPb = new ProcessBuilder(rightCmd);
-            
-            // Inherit stdout of right process so output goes to terminal
-            rightPb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-            
-            Process leftProcess = leftPb.start();
-            Process rightProcess = rightPb.start();
-            
-            // Pipe output from left to right's stdin
-            InputStream leftOutput = leftProcess.getInputStream();
-            OutputStream rightInput = rightProcess.getOutputStream();
-            
-            // Create a thread to pipe the data
-            Thread pipeThread = new Thread(() -> {
-                try {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = leftOutput.read(buffer)) != -1) {
-                        rightInput.write(buffer, 0, bytesRead);
-                        rightInput.flush();
+                
+                String command = cmdTokens.get(0);
+                String[] args = cmdTokens.size() > 1 ? 
+                    cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
+                    new String[0];
+                
+                // Check if it's a builtin
+                if (builtins.contains(command)) {
+                    // For builtins in multi-stage pipeline, we need to handle them specially
+                    // We'll execute them and capture output
+                    String output = executeBuiltinForPipeline(command, args);
+                    if (output != null) {
+                        // Store the output for the next command
+                        // We'll handle this in the pipeline logic
                     }
-                    rightInput.close();
-                } catch (IOException e) {
-                    // Ignore
+                    continue;
                 }
-            });
-            pipeThread.start();
-            
-            // Wait for left process to finish
-            leftProcess.waitFor();
-            
-            // Wait for pipe thread to finish
-            try {
-                pipeThread.join();
-            } catch (InterruptedException e) {
-                // Ignore
+                
+                String path = findExecutable(command);
+                if (path == null) {
+                    System.out.println(command + ": command not found");
+                    return;
+                }
+                
+                List<String> cmd = new ArrayList<>();
+                cmd.add(command);
+                cmd.addAll(Arrays.asList(args));
+                
+                ProcessBuilder pb = new ProcessBuilder(cmd);
+                processBuilders.add(pb);
             }
             
-            // Close right input to signal EOF
-            rightInput.close();
+            // If all commands are builtins, handle them sequentially
+            if (processBuilders.isEmpty()) {
+                String currentOutput = null;
+                for (List<String> cmdTokens : commandTokens) {
+                    String command = cmdTokens.get(0);
+                    String[] args = cmdTokens.size() > 1 ? 
+                        cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
+                        new String[0];
+                    
+                    // For builtins in pipeline, pass the previous output as input
+                    String output = executeBuiltinForPipeline(command, args, currentOutput);
+                    if (output != null) {
+                        currentOutput = output;
+                    }
+                }
+                if (currentOutput != null && !currentOutput.isEmpty()) {
+                    System.out.print(currentOutput);
+                }
+                return;
+            }
             
-            // Wait for right process to finish
-            rightProcess.waitFor();
+            // Handle mixed builtin/external pipelines
+            // For simplicity, we'll use a more general approach
+            executeMixedPipeline(commandTokens);
             
         } catch (Exception e) {
-            System.err.println("Error executing pipeline: " + e.getMessage());
+            System.err.println("Error executing multi-stage pipeline: " + e.getMessage());
+        }
+    }
+
+    static void executeMixedPipeline(List<List<String>> commandTokens) {
+        try {
+            int numCommands = commandTokens.size();
+            List<Process> processes = new ArrayList<>();
+            List<ProcessBuilder> processBuilders = new ArrayList<>();
+            List<Boolean> isBuiltinList = new ArrayList<>();
+            List<String> builtinOutputs = new ArrayList<>();
+            
+            // First pass: identify which commands are builtins and which are external
+            for (List<String> cmdTokens : commandTokens) {
+                if (cmdTokens.isEmpty()) {
+                    System.out.println("Invalid pipeline");
+                    return;
+                }
+                
+                String command = cmdTokens.get(0);
+                String[] args = cmdTokens.size() > 1 ? 
+                    cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
+                    new String[0];
+                
+                if (builtins.contains(command)) {
+                    isBuiltinList.add(true);
+                    builtinOutputs.add(null);
+                } else {
+                    String path = findExecutable(command);
+                    if (path == null) {
+                        System.out.println(command + ": command not found");
+                        return;
+                    }
+                    isBuiltinList.add(false);
+                    
+                    List<String> cmd = new ArrayList<>();
+                    cmd.add(command);
+                    cmd.addAll(Arrays.asList(args));
+                    
+                    ProcessBuilder pb = new ProcessBuilder(cmd);
+                    processBuilders.add(pb);
+                    builtinOutputs.add(null);
+                }
+            }
+            
+            // Execute the pipeline with proper piping
+            // We need to handle builtins by capturing their output and feeding it to the next command
+            
+            // For this stage, let's implement a simpler approach:
+            // Execute commands sequentially, piping output from one to the next
+            
+            Process previousProcess = null;
+            String previousOutput = null;
+            boolean previousWasBuiltin = false;
+            
+            for (int i = 0; i < numCommands; i++) {
+                List<String> cmdTokens = commandTokens.get(i);
+                String command = cmdTokens.get(0);
+                String[] args = cmdTokens.size() > 1 ? 
+                    cmdTokens.subList(1, cmdTokens.size()).toArray(new String[0]) : 
+                    new String[0];
+                
+                boolean isBuiltin = builtins.contains(command);
+                
+                if (isBuiltin) {
+                    // Execute builtin with input from previous command
+                    String input = null;
+                    if (previousProcess != null) {
+                        // Read output from previous process
+                        try (InputStream stdout = previousProcess.getInputStream()) {
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            byte[] buffer = new byte[8192];
+                            int bytesRead;
+                            while ((bytesRead = stdout.read(buffer)) != -1) {
+                                baos.write(buffer, 0, bytesRead);
+                            }
+                            input = baos.toString();
+                        }
+                    } else if (previousOutput != null) {
+                        input = previousOutput;
+                    }
+                    
+                    String output = executeBuiltinForPipeline(command, args, input);
+                    if (output != null && i == numCommands - 1) {
+                        // Last command - print output
+                        System.out.print(output);
+                    }
+                    previousOutput = output;
+                    previousWasBuiltin = true;
+                    
+                    // Clean up previous process if it exists
+                    if (previousProcess != null) {
+                        previousProcess.waitFor();
+                        previousProcess = null;
+                    }
+                } else {
+                    // External command
+                    String path = findExecutable(command);
+                    if (path == null) {
+                        System.out.println(command + ": command not found");
+                        return;
+                    }
+                    
+                    List<String> cmd = new ArrayList<>();
+                    cmd.add(command);
+                    cmd.addAll(Arrays.asList(args));
+                    
+                    ProcessBuilder pb = new ProcessBuilder(cmd);
+                    
+                    // If this is the last command, inherit stdout
+                    if (i == numCommands - 1) {
+                        pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                    }
+                    
+                    Process process = pb.start();
+                    
+                    // If there's input from previous command, write it to this process
+                    if (previousProcess != null || previousOutput != null) {
+                        try (OutputStream stdin = process.getOutputStream()) {
+                            if (previousProcess != null) {
+                                // Pipe from previous process to this one
+                                InputStream prevStdout = previousProcess.getInputStream();
+                                byte[] buffer = new byte[8192];
+                                int bytesRead;
+                                while ((bytesRead = prevStdout.read(buffer)) != -1) {
+                                    stdin.write(buffer, 0, bytesRead);
+                                    stdin.flush();
+                                }
+                            } else if (previousOutput != null) {
+                                stdin.write(previousOutput.getBytes());
+                                stdin.flush();
+                            }
+                        }
+                    }
+                    
+                    previousProcess = process;
+                    previousOutput = null;
+                    previousWasBuiltin = false;
+                }
+            }
+            
+            // Wait for the last process if it's external
+            if (previousProcess != null) {
+                previousProcess.waitFor();
+            }
+            
+        } catch (Exception e) {
+            System.err.println("Error in mixed pipeline: " + e.getMessage());
         }
     }
 
@@ -422,78 +534,6 @@ public class Main {
             return "";
         }
         return "";
-    }
-
-    static void executeExternalWithInput(String command, String[] args, String input) {
-        try {
-            String path = findExecutable(command);
-            if (path == null) {
-                System.out.println(command + ": command not found");
-                return;
-            }
-            
-            List<String> cmd = new ArrayList<>();
-            cmd.add(command);
-            cmd.addAll(Arrays.asList(args));
-            
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-            
-            Process process = pb.start();
-            
-            // Write input to process stdin
-            try (OutputStream stdin = process.getOutputStream()) {
-                stdin.write(input.getBytes());
-                stdin.flush();
-            }
-            
-            process.waitFor();
-            
-        } catch (Exception e) {
-            System.err.println("Error executing command with input: " + e.getMessage());
-        }
-    }
-
-    static String executeExternalWithBuiltinPipe(String leftCommand, String[] leftArgs, 
-                                                  String rightCommand, String[] rightArgs) {
-        try {
-            String leftPath = findExecutable(leftCommand);
-            if (leftPath == null) {
-                System.out.println(leftCommand + ": command not found");
-                return null;
-            }
-            
-            List<String> cmd = new ArrayList<>();
-            cmd.add(leftCommand);
-            cmd.addAll(Arrays.asList(leftArgs));
-            
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            
-            // Capture output from left process
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
-            
-            Process process = pb.start();
-            
-            // Read output from process
-            try (InputStream stdout = process.getInputStream()) {
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-                while ((bytesRead = stdout.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
-                }
-            }
-            
-            int exitCode = process.waitFor();
-            String leftOutput = outputStream.toString();
-            
-            // Pipe to right builtin
-            return executeBuiltinForPipeline(rightCommand, rightArgs, leftOutput);
-            
-        } catch (Exception e) {
-            System.err.println("Error in external-to-builtin pipeline: " + e.getMessage());
-            return null;
-        }
     }
 
     static void reapCompletedJobs() {
