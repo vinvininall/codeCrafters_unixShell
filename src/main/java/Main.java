@@ -8,7 +8,6 @@ public class Main {
 
     // Keep track of background jobs
     static List<BackgroundJob> backgroundJobs = new ArrayList<>();
-    static int jobCounter = 0;
 
     static class BackgroundJob {
         int id;
@@ -26,6 +25,22 @@ public class Main {
             this.status = "Running";
             this.reaped = false;
         }
+    }
+
+    // Get the next available job number
+    static int getNextJobNumber() {
+        if (backgroundJobs.isEmpty()) {
+            return 1;
+        }
+        
+        // Find the highest job number currently in use
+        int highest = 0;
+        for (BackgroundJob job : backgroundJobs) {
+            if (job.id > highest) {
+                highest = job.id;
+            }
+        }
+        return highest + 1;
     }
 
     public static void main(String[] args) {
@@ -230,8 +245,6 @@ public class Main {
             }
             
             // After running a foreground command, reap any completed jobs
-            // But don't reap if we just ran a command that might have completed
-            // Actually, we should reap after the command completes
             reapCompletedJobs();
         }
     }
@@ -270,7 +283,6 @@ public class Main {
             
             for (BackgroundJob job : completedJobs) {
                 // Determine marker - for reaping, we show the marker based on the current state
-                // Since these jobs are completed and about to be removed, use appropriate marker
                 String marker = " ";
                 // Check if this is the most recent completed job
                 if (job.id == completedJobs.get(completedJobs.size() - 1).id) {
@@ -452,8 +464,8 @@ public class Main {
             return;
         }
         
-        // Create a new job ID (sequential starting from 1)
-        int jobId = ++jobCounter;
+        // Get the next available job number
+        int jobId = getNextJobNumber();
         
         // Use a latch to wait for the PID to be printed
         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
