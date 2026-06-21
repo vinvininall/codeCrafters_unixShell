@@ -41,6 +41,9 @@ public class Main {
         }));
 
         while (true) {
+            // Reap completed jobs before showing the prompt
+            reapCompletedJobs();
+
             System.out.print("$ ");
             System.out.flush();
 
@@ -225,7 +228,69 @@ public class Main {
                 runBackgroundJob(command, argsArr, fullCommandString, redirectOutput, redirectStdout, 
                                redirectStderr, outputFile, appendMode);
             }
+            
+            // After running a foreground command, reap any completed jobs
+            // But don't reap if we just ran a command that might have completed
+            // Actually, we should reap after the command completes
+            reapCompletedJobs();
         }
+    }
+
+    static void reapCompletedJobs() {
+        // Check each job's status
+        List<BackgroundJob> completedJobs = new ArrayList<>();
+        List<BackgroundJob> runningJobs = new ArrayList<>();
+        
+        for (BackgroundJob job : backgroundJobs) {
+            if (job.process != null) {
+                try {
+                    // Check if the process has exited (without blocking)
+                    int exitCode = job.process.exitValue();
+                    // Process has exited
+                    job.completed = true;
+                    job.status = "Done";
+                    completedJobs.add(job);
+                } catch (IllegalThreadStateException e) {
+                    // Process is still running
+                    job.status = "Running";
+                    runningJobs.add(job);
+                }
+            } else {
+                // Process is null, mark as completed
+                job.completed = true;
+                job.status = "Done";
+                completedJobs.add(job);
+            }
+        }
+        
+        // Display completed jobs
+        if (!completedJobs.isEmpty()) {
+            // Sort completed jobs by ID (oldest first)
+            completedJobs.sort((a, b) -> Integer.compare(a.id, b.id));
+            
+            for (BackgroundJob job : completedJobs) {
+                // Determine marker - for reaping, we show the marker based on the current state
+                // Since these jobs are completed and about to be removed, use appropriate marker
+                String marker = " ";
+                // Check if this is the most recent completed job
+                if (job.id == completedJobs.get(completedJobs.size() - 1).id) {
+                    marker = "+";
+                } else if (completedJobs.size() > 1 && 
+                           job.id == completedJobs.get(completedJobs.size() - 2).id) {
+                    marker = "-";
+                }
+                
+                // Status field padded to 24 characters total
+                String status = "Done";
+                String paddedStatus = String.format("%-24s", status);
+                
+                // Done jobs don't have trailing &
+                System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + job.command);
+            }
+        }
+        
+        // Only keep running jobs
+        backgroundJobs = runningJobs;
     }
 
     static void executeCommand(String command, String[] argsArr, 
@@ -452,7 +517,7 @@ public class Main {
                 
                 process.waitFor();
                 
-                // Mark job as completed (will be reaped on next jobs call)
+                // Mark job as completed (will be reaped automatically)
                 synchronized (backgroundJobs) {
                     job.completed = true;
                     job.status = "Done";
