@@ -308,11 +308,13 @@ public class Main {
             ProcessBuilder leftPb = new ProcessBuilder(leftCmd);
             ProcessBuilder rightPb = new ProcessBuilder(rightCmd);
             
-            // Connect stdout of left to stdin of right
+            // Important: Inherit stdout of right process so output goes to terminal
+            rightPb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            
             Process leftProcess = leftPb.start();
             Process rightProcess = rightPb.start();
             
-            // Pipe output from left to right
+            // Pipe output from left to right's stdin
             InputStream leftOutput = leftProcess.getInputStream();
             OutputStream rightInput = rightProcess.getOutputStream();
             
@@ -333,7 +335,7 @@ public class Main {
             pipeThread.start();
             
             // Wait for left process to finish
-            int leftExitCode = leftProcess.waitFor();
+            leftProcess.waitFor();
             
             // Wait for pipe thread to finish
             try {
@@ -342,15 +344,11 @@ public class Main {
                 // Ignore
             }
             
-            // Wait for right process to finish
-            int rightExitCode = rightProcess.waitFor();
+            // Close right input to signal EOF
+            rightInput.close();
             
-            // If background, don't wait for completion
-            if (!background) {
-                // Wait for both processes
-                leftProcess.waitFor();
-                rightProcess.waitFor();
-            }
+            // Wait for right process to finish
+            rightProcess.waitFor();
             
         } catch (Exception e) {
             System.err.println("Error executing pipeline: " + e.getMessage());
