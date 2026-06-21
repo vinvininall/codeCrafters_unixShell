@@ -283,6 +283,38 @@ public class Main {
                 rightTokens.subList(1, rightTokens.size()).toArray(new String[0]) : 
                 new String[0];
             
+            // Check if commands are builtins
+            boolean leftIsBuiltin = builtins.contains(leftCommand);
+            boolean rightIsBuiltin = builtins.contains(rightCommand);
+            
+            // Handle pipeline with builtins
+            if (leftIsBuiltin && rightIsBuiltin) {
+                // Both are builtins - execute left, capture output, pipe to right
+                String leftOutput = executeBuiltinForPipeline(leftCommand, leftArgs);
+                String rightOutput = executeBuiltinForPipeline(rightCommand, rightArgs, leftOutput);
+                if (rightOutput != null && !rightOutput.isEmpty()) {
+                    System.out.print(rightOutput);
+                }
+                return;
+            } else if (leftIsBuiltin) {
+                // Left is builtin, right is external
+                String leftOutput = executeBuiltinForPipeline(leftCommand, leftArgs);
+                if (leftOutput == null) {
+                    return;
+                }
+                // Pipe left output to right command
+                executeExternalWithInput(rightCommand, rightArgs, leftOutput);
+                return;
+            } else if (rightIsBuiltin) {
+                // Left is external, right is builtin
+                String rightOutput = executeExternalWithBuiltinPipe(leftCommand, leftArgs, rightCommand, rightArgs);
+                if (rightOutput != null && !rightOutput.isEmpty()) {
+                    System.out.print(rightOutput);
+                }
+                return;
+            }
+            
+            // Both are external commands - original pipeline logic
             // Find executables
             String leftPath = findExecutable(leftCommand);
             String rightPath = findExecutable(rightCommand);
@@ -308,7 +340,7 @@ public class Main {
             ProcessBuilder leftPb = new ProcessBuilder(leftCmd);
             ProcessBuilder rightPb = new ProcessBuilder(rightCmd);
             
-            // Important: Inherit stdout of right process so output goes to terminal
+            // Inherit stdout of right process so output goes to terminal
             rightPb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             
             Process leftProcess = leftPb.start();
@@ -352,6 +384,115 @@ public class Main {
             
         } catch (Exception e) {
             System.err.println("Error executing pipeline: " + e.getMessage());
+        }
+    }
+
+    static String executeBuiltinForPipeline(String command, String[] args) {
+        return executeBuiltinForPipeline(command, args, null);
+    }
+
+    static String executeBuiltinForPipeline(String command, String[] args, String input) {
+        if (command.equals("echo")) {
+            return String.join(" ", args) + "\n";
+        } else if (command.equals("type")) {
+            if (args.length == 0) {
+                return "";
+            }
+            String cmd = args[0];
+            if (builtins.contains(cmd)) {
+                return cmd + " is a shell builtin\n";
+            } else {
+                String path = findExecutable(cmd);
+                if (path != null) {
+                    return cmd + " is " + path + "\n";
+                } else {
+                    return cmd + ": not found\n";
+                }
+            }
+        } else if (command.equals("pwd")) {
+            return System.getProperty("user.dir") + "\n";
+        } else if (command.equals("cd")) {
+            // cd in pipeline doesn't make sense - just return empty
+            return "";
+        } else if (command.equals("jobs")) {
+            // jobs in pipeline - return empty for now
+            return "";
+        } else if (command.equals("exit")) {
+            // exit in pipeline - return empty
+            return "";
+        }
+        return "";
+    }
+
+    static void executeExternalWithInput(String command, String[] args, String input) {
+        try {
+            String path = findExecutable(command);
+            if (path == null) {
+                System.out.println(command + ": command not found");
+                return;
+            }
+            
+            List<String> cmd = new ArrayList<>();
+            cmd.add(command);
+            cmd.addAll(Arrays.asList(args));
+            
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            
+            Process process = pb.start();
+            
+            // Write input to process stdin
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(input.getBytes());
+                stdin.flush();
+            }
+            
+            process.waitFor();
+            
+        } catch (Exception e) {
+            System.err.println("Error executing command with input: " + e.getMessage());
+        }
+    }
+
+    static String executeExternalWithBuiltinPipe(String leftCommand, String[] leftArgs, 
+                                                  String rightCommand, String[] rightArgs) {
+        try {
+            String leftPath = findExecutable(leftCommand);
+            if (leftPath == null) {
+                System.out.println(leftCommand + ": command not found");
+                return null;
+            }
+            
+            List<String> cmd = new ArrayList<>();
+            cmd.add(leftCommand);
+            cmd.addAll(Arrays.asList(leftArgs));
+            
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            
+            // Capture output from left process
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+            
+            Process process = pb.start();
+            
+            // Read output from process
+            try (InputStream stdout = process.getInputStream()) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = stdout.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+            }
+            
+            int exitCode = process.waitFor();
+            String leftOutput = outputStream.toString();
+            
+            // Pipe to right builtin
+            return executeBuiltinForPipeline(rightCommand, rightArgs, leftOutput);
+            
+        } catch (Exception e) {
+            System.err.println("Error in external-to-builtin pipeline: " + e.getMessage());
+            return null;
         }
     }
 
