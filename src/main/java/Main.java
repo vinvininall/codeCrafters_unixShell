@@ -33,7 +33,6 @@ public class Main {
             return 1;
         }
         
-        // Find the highest job number currently in use
         int highest = 0;
         for (BackgroundJob job : backgroundJobs) {
             if (job.id > highest) {
@@ -82,6 +81,36 @@ public class Main {
             
             if (tokens.isEmpty())
                 continue;
+            
+            // Check for pipeline
+            int pipeIndex = -1;
+            for (int i = 0; i < tokens.size(); i++) {
+                if (tokens.get(i).equals("|")) {
+                    pipeIndex = i;
+                    break;
+                }
+            }
+            
+            // If there's a pipeline, handle it
+            if (pipeIndex != -1) {
+                // Split tokens into left and right commands
+                List<String> leftTokens = tokens.subList(0, pipeIndex);
+                List<String> rightTokens = tokens.subList(pipeIndex + 1, tokens.size());
+                
+                // Remove background job indicator from the right command if present
+                boolean background = false;
+                if (!rightTokens.isEmpty() && rightTokens.get(rightTokens.size() - 1).equals("&")) {
+                    background = true;
+                    rightTokens.remove(rightTokens.size() - 1);
+                }
+                
+                // Execute the pipeline
+                executePipeline(leftTokens, rightTokens, background);
+                
+                // Reap completed jobs after pipeline
+                reapCompletedJobs();
+                continue;
+            }
             
             // Check for background job (&)
             boolean background = false;
@@ -172,52 +201,43 @@ public class Main {
                 for (BackgroundJob job : backgroundJobs) {
                     if (job.process != null) {
                         try {
-                            // Check if the process has exited (without blocking)
                             int exitCode = job.process.exitValue();
-                            // Process has exited
                             job.completed = true;
                             job.status = "Done";
                             completedJobs.add(job);
                         } catch (IllegalThreadStateException e) {
-                            // Process is still running
                             job.status = "Running";
                             runningJobs.add(job);
                         }
                     } else {
-                        // Process is null, mark as completed
                         job.completed = true;
                         job.status = "Done";
                         completedJobs.add(job);
                     }
                 }
                 
-                // Combine both lists and sort by job ID (oldest first)
                 List<BackgroundJob> allJobs = new ArrayList<>();
                 allJobs.addAll(runningJobs);
                 allJobs.addAll(completedJobs);
                 allJobs.sort((a, b) -> Integer.compare(a.id, b.id));
                 
-                // Display all jobs in order of job number
                 if (!allJobs.isEmpty()) {
                     int size = allJobs.size();
                     for (int i = 0; i < size; i++) {
                         BackgroundJob job = allJobs.get(i);
                         
-                        // Determine marker based on position in the sorted list
                         String marker;
                         if (i == size - 1) {
-                            marker = "+";  // Most recent job (highest ID)
+                            marker = "+";
                         } else if (i == size - 2) {
-                            marker = "-";  // Second most recent job
+                            marker = "-";
                         } else {
-                            marker = " ";  // Older jobs get a space
+                            marker = " ";
                         }
                         
-                        // Status field padded to 24 characters total
                         String status = job.status;
                         String paddedStatus = String.format("%-24s", status);
                         
-                        // Command with trailing & only for Running jobs
                         String cmdDisplay = job.command;
                         if (job.status.equals("Running")) {
                             cmdDisplay = job.command + " &";
@@ -227,9 +247,7 @@ public class Main {
                     }
                 }
                 
-                // Only keep running jobs (completed jobs are removed after being displayed once)
                 backgroundJobs = runningJobs;
-                
                 continue;
             }
 
@@ -239,52 +257,133 @@ public class Main {
                 executeCommand(command, argsArr, redirectOutput, redirectStdout, 
                               redirectStderr, outputFile, appendMode, background, isBuiltin);
             } else {
-                // Run external command in background
                 runBackgroundJob(command, argsArr, fullCommandString, redirectOutput, redirectStdout, 
                                redirectStderr, outputFile, appendMode);
             }
             
-            // After running a foreground command, reap any completed jobs
             reapCompletedJobs();
         }
     }
 
+    static void executePipeline(List<String> leftTokens, List<String> rightTokens, boolean background) {
+        try {
+            // Parse left command
+            if (leftTokens.isEmpty() || rightTokens.isEmpty()) {
+                System.out.println("Invalid pipeline");
+                return;
+            }
+            
+            String leftCommand = leftTokens.get(0);
+            String[] leftArgs = leftTokens.size() > 1 ? 
+                leftTokens.subList(1, leftTokens.size()).toArray(new String[0]) : 
+                new String[0];
+            
+            String rightCommand = rightTokens.get(0);
+            String[] rightArgs = rightTokens.size() > 1 ? 
+                rightTokens.subList(1, rightTokens.size()).toArray(new String[0]) : 
+                new String[0];
+            
+            // Find executables
+            String leftPath = findExecutable(leftCommand);
+            String rightPath = findExecutable(rightCommand);
+            
+            if (leftPath == null) {
+                System.out.println(leftCommand + ": command not found");
+                return;
+            }
+            if (rightPath == null) {
+                System.out.println(rightCommand + ": command not found");
+                return;
+            }
+            
+            // Build ProcessBuilder for both commands
+            List<String> leftCmd = new ArrayList<>();
+            leftCmd.add(leftCommand);
+            leftCmd.addAll(Arrays.asList(leftArgs));
+            
+            List<String> rightCmd = new ArrayList<>();
+            rightCmd.add(rightCommand);
+            rightCmd.addAll(Arrays.asList(rightArgs));
+            
+            ProcessBuilder leftPb = new ProcessBuilder(leftCmd);
+            ProcessBuilder rightPb = new ProcessBuilder(rightCmd);
+            
+            // Connect stdout of left to stdin of right
+            Process leftProcess = leftPb.start();
+            Process rightProcess = rightPb.start();
+            
+            // Pipe output from left to right
+            InputStream leftOutput = leftProcess.getInputStream();
+            OutputStream rightInput = rightProcess.getOutputStream();
+            
+            // Create a thread to pipe the data
+            Thread pipeThread = new Thread(() -> {
+                try {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = leftOutput.read(buffer)) != -1) {
+                        rightInput.write(buffer, 0, bytesRead);
+                        rightInput.flush();
+                    }
+                    rightInput.close();
+                } catch (IOException e) {
+                    // Ignore
+                }
+            });
+            pipeThread.start();
+            
+            // Wait for left process to finish
+            int leftExitCode = leftProcess.waitFor();
+            
+            // Wait for pipe thread to finish
+            try {
+                pipeThread.join();
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+            
+            // Wait for right process to finish
+            int rightExitCode = rightProcess.waitFor();
+            
+            // If background, don't wait for completion
+            if (!background) {
+                // Wait for both processes
+                leftProcess.waitFor();
+                rightProcess.waitFor();
+            }
+            
+        } catch (Exception e) {
+            System.err.println("Error executing pipeline: " + e.getMessage());
+        }
+    }
+
     static void reapCompletedJobs() {
-        // Check each job's status
         List<BackgroundJob> completedJobs = new ArrayList<>();
         List<BackgroundJob> runningJobs = new ArrayList<>();
         
         for (BackgroundJob job : backgroundJobs) {
             if (job.process != null) {
                 try {
-                    // Check if the process has exited (without blocking)
                     int exitCode = job.process.exitValue();
-                    // Process has exited
                     job.completed = true;
                     job.status = "Done";
                     completedJobs.add(job);
                 } catch (IllegalThreadStateException e) {
-                    // Process is still running
                     job.status = "Running";
                     runningJobs.add(job);
                 }
             } else {
-                // Process is null, mark as completed
                 job.completed = true;
                 job.status = "Done";
                 completedJobs.add(job);
             }
         }
         
-        // Display completed jobs
         if (!completedJobs.isEmpty()) {
-            // Sort completed jobs by ID (oldest first)
             completedJobs.sort((a, b) -> Integer.compare(a.id, b.id));
             
             for (BackgroundJob job : completedJobs) {
-                // Determine marker - for reaping, we show the marker based on the current state
                 String marker = " ";
-                // Check if this is the most recent completed job
                 if (job.id == completedJobs.get(completedJobs.size() - 1).id) {
                     marker = "+";
                 } else if (completedJobs.size() > 1 && 
@@ -292,16 +391,12 @@ public class Main {
                     marker = "-";
                 }
                 
-                // Status field padded to 24 characters total
                 String status = "Done";
                 String paddedStatus = String.format("%-24s", status);
-                
-                // Done jobs don't have trailing &
                 System.out.println("[" + job.id + "]" + marker + "  " + paddedStatus + job.command);
             }
         }
         
-        // Only keep running jobs
         backgroundJobs = runningJobs;
     }
 
@@ -309,7 +404,6 @@ public class Main {
                                boolean redirectOutput, boolean redirectStdout,
                                boolean redirectStderr, String outputFile, 
                                boolean appendMode, boolean background, boolean isBuiltin) {
-        // echo builtin
         if (command.equals("echo")) {
             String output = String.join(" ", argsArr);
             if (redirectOutput && redirectStdout) {
@@ -323,7 +417,6 @@ public class Main {
             return;
         }
 
-        // pwd builtin
         if (command.equals("pwd")) {
             String cwd = System.getProperty("user.dir");
             if (redirectOutput && redirectStdout) {
@@ -337,7 +430,6 @@ public class Main {
             return;
         }
 
-        // cd builtin
         if (command.equals("cd")) {
             if (argsArr.length == 0) {
                 String home = System.getenv("HOME");
@@ -407,7 +499,6 @@ public class Main {
             return;
         }
 
-        // type builtin
         if (command.equals("type")) {
             String cmd = argsArr.length > 0 ? argsArr[0] : "";
             String output = "";
@@ -435,7 +526,6 @@ public class Main {
             return;
         }
 
-        // external command execution
         String path = findExecutable(command);
 
         if (path != null) {
@@ -464,10 +554,8 @@ public class Main {
             return;
         }
         
-        // Get the next available job number
         int jobId = getNextJobNumber();
         
-        // Use a latch to wait for the PID to be printed
         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         
         Thread backgroundThread = new Thread(() -> {
@@ -515,21 +603,17 @@ public class Main {
 
                 Process process = pb.start();
                 
-                // Store the job with the full command string
                 BackgroundJob job = new BackgroundJob(jobId, fullCommandString, process);
                 synchronized (backgroundJobs) {
                     backgroundJobs.add(job);
                 }
                 
-                // Print the job notification: [jobId] pid
                 System.out.println("[" + jobId + "] " + process.pid());
                 
-                // Signal that the PID has been printed
                 latch.countDown();
                 
                 process.waitFor();
                 
-                // Mark job as completed (will be reaped automatically)
                 synchronized (backgroundJobs) {
                     job.completed = true;
                     job.status = "Done";
@@ -537,14 +621,13 @@ public class Main {
                 
             } catch (Exception e) {
                 System.err.println("Error in background job: " + e.getMessage());
-                latch.countDown(); // Ensure we don't block forever
+                latch.countDown();
             }
         });
         
         backgroundThread.setDaemon(true);
         backgroundThread.start();
         
-        // Wait for the PID to be printed before continuing
         try {
             latch.await();
         } catch (InterruptedException e) {
